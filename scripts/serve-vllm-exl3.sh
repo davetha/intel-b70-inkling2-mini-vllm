@@ -156,7 +156,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
+# Every INKLING2_*/EXL3_* setting from the host reaches the container; the explicit --env lines below still win.
+env | grep -E '^(INKLING2|EXL3)_[A-Z0-9_]*=' > "$work/inkling.env" || true
+timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" --env-file "$work/inkling.env" \
     --cidfile "$cid_dir/container" --network host --device "$render_node" --memory 23g --cpus 8 \
     --workdir /tmp --shm-size 1g --ulimit core=0 \
     --mount "type=bind,source=$PWD,target=/lab,readonly" \

@@ -86,6 +86,9 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         ])
 
     def load_weights(self, weights):
+        if os.environ.get("INKLING2_ONEDNN_DETERMINISTIC") == "1":
+            # oneDNN otherwise picks reduction orders per call, so identical bf16 GEMMs can differ run to run.
+            torch.backends.mkldnn.deterministic = True
         device = torch.device("xpu", torch.xpu.current_device())
         min_dpas = int(os.environ.get("INKLING2_EXL3_PREFILL_MIN", "1025"))
         moe_ops().moe_set_prefill_min_m(min_dpas)
