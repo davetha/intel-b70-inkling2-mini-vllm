@@ -1,6 +1,7 @@
 """Batch-one vLLM adapter for the Intel XPU Inkling EXL3 model."""
 
 import json
+from functools import partial
 import logging
 import os
 from pathlib import Path
@@ -40,6 +41,13 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         checkpoint = Path(vllm_config.model_config.model)
         raw = json.loads((checkpoint / "config.json").read_text())
         super().__init__(SimpleNamespace(inkling_text=raw["text_config"], inkling_vision=None), external_slots=1)
+        self.prefill_controller = os.environ.get("INKLING2_PREFILL_CONTROLLER", "0") == "1"
+        self.prefill_bank = os.environ.get("INKLING2_PREFILL_BANK", "0") == "1"
+        self.prefill_dense_bf16 = os.environ.get("INKLING2_PREFILL_DENSE_BF16", "0") == "1"
+        self.prefill_prep = os.environ.get("INKLING2_PREFILL_PREP", "0") == "1"
+        self.prefill_local_bias = os.environ.get("INKLING2_PREFILL_LOCAL_BIAS", "0") == "table"
+        self.prefill_kv_conv = os.environ.get("INKLING2_PREFILL_KV_CONV", "0") == "1"
+        self.prefill_output_conv = os.environ.get("INKLING2_PREFILL_OUTPUT_CONV", "0") == "1"
         self.enable_ring_prefix = cache.enable_prefix_caching
         self.ring_high = self.saved_frontier = 0
         self.saved_rings = []
@@ -75,6 +83,8 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self.checkpoint = checkpoint
         self.logit_cap = self.tc["final_logit_softcapping"]
         self.cache_dtype = torch.float8_e4m3fn if cache.cache_dtype.startswith("fp8") else torch.bfloat16
+        self.prefill_prefix_io = os.environ.get("INKLING2_PREFILL_PREFIX_IO", "0") == "1"
+        self.tight_prefix = os.environ.get("INKLING2_PREFILL_TIGHT_PREFIX", "0") == "1"
         self.prefix_block = int(os.environ.get("INKLING2_ONEDNN_PREFIX_BLOCK", "0"))
         if self.prefix_block:
             if self.prefix_block < 0 or self.prefix_block % self.page_tokens:
@@ -107,6 +117,10 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             experts = {layer: InklingEXL3Experts(self.checkpoint, layer, device, self.tc["n_routed_experts"])
                        for layer in range(self.n_layers)}
         super().load_weights(weights, experts=experts)
+        self.prefill_depth = None
+        if os.environ.get("INKLING2_PREFILL_DEPTH", "0") == "1":
+            from .prefill_depth import DepthQueries
+            self.prefill_depth = DepthQueries(self.w, self.D)
         if self.want_dspark:
             from .dspark import InklingDraft, bind_target
             self.draft = InklingDraft(self.checkpoint, device, self.max_context)
@@ -155,6 +169,24 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         return decode_paged(q, key_cache, value_cache, batch.block_table, batch.seq_lens, pos, rel, proj, sink,
                             queries_per_request=q.shape[0], num_splits=splits)
 
+    def _control_norm(self, il, module, cur, msg, weight):
+        if self.prefill_controller and not self._static and cur.shape[0] > 8:
+            down = self.lin[f"layers.{il}.controllers.{module}.down_weight"]
+            up, _ = self.fused[il, "gf" + module]
+            if down.w8a8 is None and up.w8a8 is None:
+                from .prefill_controller import controller
+                return controller(cur, msg, weight, down.w, up.w)
+        return super()._control_norm(il, module, cur, msg, weight)
+
+    def _conv(self, vi, name, x, weight, dynamic, reqs, pos):
+        use_prefill_conv = self.prefill_output_conv if name in ("attn_out", "mlp_out") else self.prefill_kv_conv
+        if use_prefill_conv and not self._static:
+            from .prefill_kernels import prefill_conv
+            slot, _, _, start = reqs[0]
+            offset, _ = self.conv_ch[name]
+            return prefill_conv(x, weight, self.conv[vi, slot], self.conv_pos[slot], start, offset, dynamic)
+        return super()._conv(vi, name, x, weight, dynamic, reqs, pos)
+
     def _prefill_global(self, visit, q, k, v, table, sink, reqs, batch):
         key_cache, value_cache = self._pages(visit, batch)
         self._store_kv(key_cache, value_cache, k, v, batch.out_cache_loc)
@@ -173,9 +205,14 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         if batch.first_position == 0:
             # The first chunk already has every key and value in logical order.
             keys, values = k, v
-        elif self.prefix_block and batch.first_position + 1 - table.shape[-1] >= self.prefix_block:
+        elif self.prefix_block and batch.first_position + 1 - table.shape[-1] >= (self.page_tokens if self.tight_prefix else self.prefix_block):
+            read_heads = None
+            if self.prefill_prefix_io and not self.packed_kv:
+                from .prefix_io import read_heads as gather_heads
+                read_heads = partial(gather_heads, key_cache, value_cache, batch.block_table[0])
             return [hybrid_prefill(q, table, sink, batch.first_position, batch.total_tokens,
-                                   self.prefix_block, read_kv)]
+                                   self.prefix_block, read_kv, split_alignment=self.page_tokens if self.tight_prefix else None,
+                                   read_heads=read_heads)]
         else:
             keys, values = read_kv(0, batch.total_tokens)
         return [attention_prefill_esimd(q, keys, values, batch.first_position, 0, table, sink, qtw=4)]

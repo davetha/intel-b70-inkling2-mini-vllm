@@ -38,12 +38,26 @@ fi
 check_vendor_patch() {
     local source_file=$1
     local patch_file="$PWD/patches/$2"
+    local previous_sha=${3:-}
     if git -C "$vendor" diff --quiet -- "$source_file"; then
         git -C "$vendor" apply "$patch_file"
+    elif [[ -n $previous_sha && $(sha256sum < "$vendor/$source_file" | cut -d' ' -f1) == "$previous_sha" ]]; then
+        # Replace only the exact previous released adapter. Preserve local edits.
+        local staged
+        staged=$(mktemp "$vendor/$source_file.update.XXXXXX")
+        if git -C "$vendor" show "HEAD:$source_file" > "$staged" &&
+            patch --silent --batch --forward --fuzz=0 "$staged" "$patch_file" &&
+            chmod --reference="$vendor/$source_file" "$staged"; then
+            mv -- "$staged" "$vendor/$source_file"
+        else
+            rm -f -- "$staged"
+            return 1
+        fi
     fi
     git -C "$vendor" diff -- "$source_file" | cmp - "$patch_file"
 }
-check_vendor_patch xpu/exl3xpu/inkling2/sgl_model.py trellis-inkling-external-runner.patch
+check_vendor_patch xpu/exl3xpu/inkling2/sgl_model.py trellis-inkling-external-runner.patch \
+    9227ddc921e5dad0c598fb712d029534fb3ca6732cf0a98f38a38bcc8e5e2896
 check_vendor_patch xpu/exl3xpu/inkling2/dense.py trellis-inkling-dense-w8a8-prefill.patch
 
 mkdir -p "$work/config" "$work/plugin/inkling2_b70-0.1.dist-info" .work/python
@@ -156,6 +170,16 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" --e
     --env PYTHONPATH=/lab:/lab/.work/python:/lab/.work/vllm-inkling/plugin \
     --env PYTHONDONTWRITEBYTECODE=1 --env VLLM_PLUGINS=inkling2_b70 --env VLLM_NO_USAGE_STATS=1 \
     --env "EXL3_MOE_LIB=${INKLING2_EXL3_MOE_LIB:-/lab/.work/build/inkling2-exl3-moe.so}" \
+    --env "INKLING2_PREFILL_PREP=${INKLING2_PREFILL_PREP:-0}" \
+    --env "INKLING2_PREFILL_DENSE_BF16=${INKLING2_PREFILL_DENSE_BF16:-0}" \
+    --env "INKLING2_PREFILL_CONTROLLER=${INKLING2_PREFILL_CONTROLLER:-0}" \
+    --env "INKLING2_PREFILL_BANK=${INKLING2_PREFILL_BANK:-0}" \
+    --env "INKLING2_PREFILL_DEPTH=${INKLING2_PREFILL_DEPTH:-0}" \
+    --env "INKLING2_PREFILL_TIGHT_PREFIX=${INKLING2_PREFILL_TIGHT_PREFIX:-0}" \
+    --env "INKLING2_PREFILL_PREFIX_IO=${INKLING2_PREFILL_PREFIX_IO:-0}" \
+    --env "INKLING2_PREFILL_KV_CONV=${INKLING2_PREFILL_KV_CONV:-0}" \
+    --env "INKLING2_PREFILL_OUTPUT_CONV=${INKLING2_PREFILL_OUTPUT_CONV:-0}" \
+    --env "INKLING2_PREFILL_LOCAL_BIAS=${INKLING2_PREFILL_LOCAL_BIAS:-0}" \
     --env "INKLING2_NATIVE_DEPTH_MIX=${INKLING2_NATIVE_DEPTH_MIX:-0}" \
     --env "INKLING2_QKV_LIB=${INKLING2_QKV_LIB:-}" \
     --env "INKLING2_QKV_SPLITS=${INKLING2_QKV_SPLITS:-2}" \

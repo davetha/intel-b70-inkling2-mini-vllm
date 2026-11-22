@@ -1,5 +1,5 @@
 diff --git a/xpu/exl3xpu/inkling2/sgl_model.py b/xpu/exl3xpu/inkling2/sgl_model.py
-index 9eb7429..2f5921b 100644
+index 9eb7429..27de78b 100644
 --- a/xpu/exl3xpu/inkling2/sgl_model.py
 +++ b/xpu/exl3xpu/inkling2/sgl_model.py
 @@ -38,7 +38,7 @@ _FUSED_CONV = os.environ.get("INKLING2_FUSED_CONV", "1") == "1"
@@ -164,7 +164,7 @@ index 9eb7429..2f5921b 100644
      def _attention(self, il, vi, inq, ink, inv, pos, reqs, fb, glob):
          p = f"layers.{il}.attn."
          T = inq.shape[0]
-@@ -336,40 +397,55 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -336,51 +397,80 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
          lq, sq = self.fused[(il, "qrgs")]
          lk, sk_ = self.fused[(il, "k")]
          lv, sv_ = self.fused[(il, "v")]
@@ -175,9 +175,14 @@ index 9eb7429..2f5921b 100644
 -            vv, vdyn = vv.split(sv_, -1)
 -        k = self._conv(vi, "k", kk, self.f32[p + "k_sconv.weight"], kdyn, reqs, pos)
 -        v = self._conv(vi, "v", vv, self.f32[p + "v_sconv.weight"], vdyn, reqs, pos)
++        use_bf16 = not self._static and getattr(self, "prefill_dense_bf16", False) and self.prefill_prep and T > 8
 +        qrgs = None
 +        if self._static and self.grouped_qkv is not None:
 +            qrgs, kk, vv = self.grouped_qkv[il](inq, ink, inv)
++        elif use_bf16:
++            from inkling_xpu.prefill_kernels import bf16_prefill_linear
++            qrgs = bf16_prefill_linear(lq, inq)
++            kk, vv = bf16_prefill_linear(lk, ink), bf16_prefill_linear(lv, inv)
 +        else:
 +            kk, vv = lk(ink), lv(inv)
 +        native_prep = self._static and self.native_prep and _FUSED_PREP
@@ -240,11 +245,42 @@ index 9eb7429..2f5921b 100644
              o = self.L(p + "wo_ud.weight", o)
              return self._conv(vi, "attn_out", o, self.f32[f"layers.{il}.attn_sconv.weight"], None, reqs, pos)
 -        q, r, gate, sink = lq(inq).split(sq, -1)
-+        q, r, gate, sink = (lq(inq) if qrgs is None else qrgs).split(sq, -1)
-         q = q.reshape(T, self.H, self.hd)
-         r = r.reshape(T, self.H, self.d_rel)
-         q = _l2_clip(q, self.f32[p + "q_l2_clip.scale"], tc["qk_l2_clip_threshold"])
-@@ -389,15 +465,13 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+-        q = q.reshape(T, self.H, self.hd)
+-        r = r.reshape(T, self.H, self.d_rel)
+-        q = _l2_clip(q, self.f32[p + "q_l2_clip.scale"], tc["qk_l2_clip_threshold"])
+-        k = _l2_clip(k.view(T, self.Hkv, self.hd), None, tc["qk_l2_clip_threshold"])
+-        v = rms_norm(v.view(T, self.Hkv, self.hd))
+-        r = _l2_clip(r, self.f32[p + "rel_l2_clip.scale"], tc["rel_l2_clip_threshold"])
+-        if not is_local:
+-            tau = 1 + tc["log_scaling_alpha"] * torch.log(torch.clamp((pos.float() + 1) / tc["log_scaling_n_floor"], min=1.0))
+-            q = q * tau[:, None, None]
+-            r = r * tau[:, None, None]
+-        sink = sink.contiguous()
++        fused_prefill_prep = not self._static and getattr(self, "prefill_prep", False)
++        if fused_prefill_prep:
++            from inkling_xpu.prefill_kernels import prefill_prep
++            q, r, gate, sink, k, v = prefill_prep(
++                lq(inq) if qrgs is None else qrgs, k, v, pos,
++                self.f32[p + "q_l2_clip.scale"], self.f32[p + "rel_l2_clip.scale"],
++                tc["qk_l2_clip_threshold"], tc["rel_l2_clip_threshold"],
++                None if is_local else tc["log_scaling_alpha"], tc["log_scaling_n_floor"])
++        else:
++            q, r, gate, sink = (lq(inq) if qrgs is None else qrgs).split(sq, -1)
++            q = q.reshape(T, self.H, self.hd)
++            r = r.reshape(T, self.H, self.d_rel)
++            q = _l2_clip(q, self.f32[p + "q_l2_clip.scale"], tc["qk_l2_clip_threshold"])
++            k = _l2_clip(k.view(T, self.Hkv, self.hd), None, tc["qk_l2_clip_threshold"])
++            v = rms_norm(v.view(T, self.Hkv, self.hd))
++            r = _l2_clip(r, self.f32[p + "rel_l2_clip.scale"], tc["rel_l2_clip_threshold"])
++            if not is_local:
++                tau = 1 + tc["log_scaling_alpha"] * torch.log(torch.clamp((pos.float() + 1) / tc["log_scaling_n_floor"], min=1.0))
++                q = q * tau[:, None, None]
++                r = r * tau[:, None, None]
++            sink = sink.contiguous()
+         proj = self.f32[p + "rel_logits_proj.proj"]
+         if self._static:
+             sl = self._st_slot
+@@ -389,19 +479,21 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
                  kb, vb = self.swa_k[si], self.swa_v[si]
                  rows = sl * RING + pos.remainder(RING)
                  kb[rows] = k.to(torch.bfloat16); vb[rows] = v.to(torch.bfloat16)
@@ -266,7 +302,16 @@ index 9eb7429..2f5921b 100644
              o = o.reshape(T, self.H * self.hd) * torch.sigmoid(gate)
              o = self.L(p + "wo_ud.weight", o)
              return self._conv(vi, "attn_out", o, self.f32[f"layers.{il}.attn_sconv.weight"], None, reqs, pos)
-@@ -417,16 +491,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+-        table = torch.einsum("thr,re->the", r, proj).to(torch.bfloat16)
++        if is_local and getattr(self, "prefill_local_bias", False) and T >= 256:
++            from inkling_xpu.prefill_kernels import local_bias
++            table = local_bias(r, proj)
++        else:
++            table = torch.einsum("thr,re->the", r, proj).to(torch.bfloat16)
+         dev = q.device
+         outs = []
+         if is_local:
+@@ -417,19 +509,14 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
              kb[self._ring_rows] = k[self._ring_src].to(torch.bfloat16)
              vb[self._ring_rows] = v[self._ring_src].to(torch.bfloat16)
          else:
@@ -282,9 +327,18 @@ index 9eb7429..2f5921b 100644
 -                del ks, vs
 +            outs = self._prefill_global(vi, q, k.to(torch.bfloat16), v.to(torch.bfloat16), table, sink, reqs, fb)
          o = torch.cat(outs) if len(outs) > 1 else outs[0]
-         o = o.reshape(T, self.H * self.hd) * torch.sigmoid(gate)
-         o = self.L(p + "wo_ud.weight", o)
-@@ -440,17 +505,29 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+-        o = o.reshape(T, self.H * self.hd) * torch.sigmoid(gate)
+-        o = self.L(p + "wo_ud.weight", o)
++        o = o.reshape(T, self.H * self.hd) * (gate if fused_prefill_prep else torch.sigmoid(gate))
++        if use_bf16:
++            from inkling_xpu.prefill_kernels import bf16_prefill_linear
++            o = bf16_prefill_linear(self.lin[p + "wo_ud.weight"], o)
++        else:
++            o = self.L(p + "wo_ud.weight", o)
+         return self._conv(vi, "attn_out", o, self.f32[f"layers.{il}.attn_sconv.weight"], None, reqs, pos)
+ 
+     def _control(self, il, module, cur, msg):
+@@ -440,17 +527,29 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
          gain, forget = torch.tanh(lgf(h)).split(sgf, -1)
          return (1 - forget) * cur + gain * msg
  
@@ -317,7 +371,7 @@ index 9eb7429..2f5921b 100644
          dev = pos.device
          # new requests: invalidate their rings
          for (s, r0, n, p0) in reqs:
-@@ -458,11 +535,12 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -458,11 +557,12 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
                  self.swa_pos[s].fill_(-1)
                  self.conv_pos[s].fill_(-1)
          # global: paged keys 0 .. p0+n-1 of each request
@@ -335,7 +389,7 @@ index 9eb7429..2f5921b 100644
          locs, starts, kp = [], [0], []
          if True:
              self._g_loc = self._g_kpos = self._g_start = None
-@@ -582,7 +660,8 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -582,7 +682,8 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
              self._idx_cache[key] = t
          return t
  
@@ -345,8 +399,14 @@ index 9eb7429..2f5921b 100644
          pos = positions.long()
          T = input_ids.shape[0]
          extend_scratch = None if self._static else self._swa_scratch
-@@ -594,7 +673,9 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -592,9 +693,15 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+             cur = rms_norm(F.embedding(input_ids, self.w["embed.weight"]), self.w["embed_norm.weight"])
+         # block store: every pushed block gets its own slot for this forward (banks of earlier passes stay valid)
          bbuf = torch.empty(self.n_block_slots, T, self.D, device=cur.device, dtype=torch.float32)
++        depth = None
++        if not self._static and getattr(self, "prefill_depth", None) is not None:
++            depth = self.prefill_depth.start(bbuf)
++            mix = depth.mix
          nslot = 0
          blocks: list[int] = []
 -        prelude = bank = bank_last = None
@@ -356,12 +416,19 @@ index 9eb7429..2f5921b 100644
          qloop, kvloop = self.w["middle_cycle_cross_pass_queries"], self.w["middle_cycle_cross_pass_kv_queries"]
          for vi, (il, pss) in enumerate(self.visits):
              is_local = il in self.local
-@@ -606,27 +687,42 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -606,33 +713,57 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
                      else:
                          bank, bank_last = blocks[len(prelude[0]) + 1:], cur
                          blocks, cur = list(prelude[0]), prelude[1]
 +                        if self.mix_cross_once and self._static:
 +                            cross_messages = self.mix_bank(bbuf, bank, bank_last, self.cross_queries)
++                        elif getattr(self, "prefill_bank", False) and not self._static and len(bank) == 1:
++                            from inkling_xpu.controller import pack_cross_queries
++                            from inkling_xpu.prefill_controller import PrefillBank
++                            queries = self.cross_queries if self.mix_cross_once else pack_cross_queries(qloop, kvloop)
++                            cross_messages = PrefillBank(bbuf[bank[0]], bank_last, queries)
++                        else:
++                            cross_messages = None
                  if pss > 0:
                      row = 2 * (il - self.core.start)
                      bidx = self._idx(bank)
@@ -407,7 +474,15 @@ index 9eb7429..2f5921b 100644
              if _DEBUG:
                  torch.xpu.synchronize(); logger.info("inkling2 visit %d layer %d pre-attn ok", vi, il)
              att = self._attention(il, vi, *inputs, pos, reqs, fb, None)
-@@ -641,10 +737,14 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+             if _DEBUG:
+                 torch.xpu.synchronize(); logger.info("inkling2 visit %d attn ok", vi)
+             if il % self.block == 0:
++                if depth is not None:
++                    depth.save(nslot, inp_sa)
+                 bbuf[nslot].copy_(inp_sa); blocks.append(nslot); nslot += 1
+                 cur = att
+             else:
+@@ -641,10 +772,14 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
              mq = self.w[f"attn_res.mlp_queries.{il}"].view(1, -1)
              mn = self.w[a + "mlp_norm.weight"].float().view(1, -1)
              if msgs is None:
@@ -425,7 +500,7 @@ index 9eb7429..2f5921b 100644
              y = self._conv(vi, "mlp_out", self._moe(il, x), self.f32[a + "mlp_sconv.weight"], None, reqs, pos)
              cur = ffn_inp + y
          if not self._static:
-@@ -655,9 +755,11 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -655,9 +790,11 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
                  m = min(n, RING)
                  pp = torch.arange(p0 + n - m, p0 + n, device=pos.device)
                  self.swa_pos[s, pp.remainder(RING)] = pp.int()

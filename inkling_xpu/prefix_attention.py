@@ -13,10 +13,13 @@ def hybrid_prefill(
     total_tokens: int,
     prefix_block: int,
     read_kv: Callable[[int, int], tuple[torch.Tensor, torch.Tensor]],
+    *, split_alignment: int | None = None,
+    read_heads: Callable[[int, int], tuple[torch.Tensor, torch.Tensor]] | None = None,
 ) -> torch.Tensor:
     # Every query can see these older keys and none receives relative bias.
     far_end = max(0, first_position + 1 - table.shape[-1])
-    prefix_end = far_end // prefix_block * prefix_block
+    alignment = split_alignment or prefix_block
+    prefix_end = far_end // alignment * alignment
     q_half = q.to(torch.float16).contiguous()
     k, v = read_kv(prefix_end, total_tokens)
     out = torch.empty_like(q_half, dtype=torch.float32)
@@ -34,10 +37,18 @@ def hybrid_prefill(
     part_lse = torch.empty(q_heads.shape[:2], dtype=torch.float32, device=q.device)
     scale = q.shape[-1] ** -0.5
     for start in range(0, prefix_end, prefix_block):
-        k, v = read_kv(start, start + prefix_block)
-        k_heads = k.transpose(0, 1).to(torch.float16).contiguous()
-        v_heads = v.transpose(0, 1).to(torch.float16).contiguous()
+        stop = min(start + prefix_block, prefix_end)
+        if read_heads is None:
+            k, v = read_kv(start, stop)
+            k_heads = k.transpose(0, 1).to(torch.float16).contiguous()
+            v_heads = v.transpose(0, 1).to(torch.float16).contiguous()
+        else:
+            k_heads, v_heads = read_heads(start, stop)
         torch.ops.exl3xpu_C.exl3_sdpa(q_heads, k_heads, v_heads, part_out, part_lse, False, scale)
+        if read_heads is not None:
+            from .prefix_io import merge
+            merge(out, lse, part_out, part_lse)
+            continue
         older_lse = part_lse.transpose(0, 1)
         normalizer = torch.logaddexp(lse, older_lse)
         out.mul_((lse - normalizer).exp().unsqueeze(-1))
