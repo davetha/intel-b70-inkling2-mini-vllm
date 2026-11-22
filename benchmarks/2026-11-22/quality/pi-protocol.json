@@ -1,0 +1,33 @@
+{
+  "client": "@earendil-works/pi-coding-agent@1.5.0",
+  "node_version": "v24.10.0",
+  "node_linux_x64_sha256": "141542ec0c8f73b568cd774ea8df43f23768cb086eb5bf21d2dea33072fb2f56",
+  "session": "Fresh persisted Pi JSON session per attempt, four native tools, no extensions, automatic compaction defaults.",
+  "tools": [
+    "read",
+    "bash",
+    "edit",
+    "write"
+  ],
+  "contextWindow": 262144,
+  "reserveTokens": 16384,
+  "keepRecentTokens": 20000,
+  "short_wall_seconds": 480,
+  "long_wall_seconds": 900,
+  "control_wall_seconds": 240,
+  "sampling": "Production provider parameters, fixed seed per session, medium reasoning, 8192 thinking budget and 16384 maximum output per call. Wire bridge only adds a trial-unique cache salt.",
+  "ordering": "Long task first, then ten selected issues, fresh-seed comparison on three cases, then matched routing/streaming fixtures. Only one model and one Pi at once.",
+  "primary": "Frozen case, solution passes official regression and preservation tests. Agent completion and wall time reported independently.",
+  "feedback": "Patch evaluation occurs after all primary solutions for each case are frozen. Pi never sees the reference solution or hidden tests.",
+  "corpus": "Same initial text for both tokenizers. Pi may summarize the original source as part of normal session compaction.",
+  "long_compaction_treatment": {
+    "keepRecentTokens": 4096,
+    "reserveTokens": 16384,
+    "seeds": [
+      42,
+      101
+    ],
+    "model": "inkling2-mini-exl3-b70",
+    "scope": "Same Django repair, adaptive DSpark and identical source for both retention settings."
+  }
+}

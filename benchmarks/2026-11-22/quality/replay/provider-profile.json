@@ -1,0 +1,57 @@
+{
+  "providers": {
+    "b70-vllm": {
+      "models": [
+        {
+          "id": "Qwen3.8-27B",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "samplingParams": {
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 20,
+            "min_p": 0.0,
+            "repetition_penalty": 1.0,
+            "seed": 42,
+            "thinking_token_budget": 8192
+          },
+          "thinkingLevelMap": {
+            "off": "none",
+            "minimal": null,
+            "low": "low",
+            "medium": "medium",
+            "high": "xhigh",
+            "xhigh": "xhigh",
+            "max": null
+          },
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsStore": false,
+            "supportsReasoningEffort": true,
+            "maxTokensField": "max_tokens",
+            "thinkingFormat": "chat-template",
+            "thinkingTokenBudgetField": "thinking_token_budget",
+            "chatTemplateKwargs": {
+              "enable_thinking": {
+                "$var": "thinking.enabled"
+              },
+              "preserve_thinking": true,
+              "reasoning_effort": {
+                "$var": "thinking.effort"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

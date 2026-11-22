@@ -1,0 +1,484 @@
+[
+  {
+    "id": "django__django-14631",
+    "arm": "fixed-long",
+    "model": "inkling2-mini-exl3-b70",
+    "seed": 42,
+    "completed": false,
+    "settled": true,
+    "stop": "length",
+    "timed_out": false,
+    "error": "",
+    "seconds": 302.314,
+    "tools": 15,
+    "requests": 16,
+    "resolved": false,
+    "pass_and_returned": false,
+    "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "patch_bytes": 0,
+    "prompt_sha256": "2b1ffefb9375a8af90ba8b3f0bbc135ece82556ac3f613e305d994731d05276a",
+    "compactions": [],
+    "compaction_starts": 0,
+    "first_prompt": 240518,
+    "first_cached": 0,
+    "max_prompt": 257507,
+    "output_tokens": 7458,
+    "first_prefill_tps": 1304.19,
+    "first_decode_tps": 76.62,
+    "first_ttft": 184.75863451199984,
+    "http_errors": [],
+    "effective_profile": {
+      "model": "inkling2-mini-exl3-b70",
+      "reasoning_effort": "medium",
+      "thinking_token_budget": 8192,
+      "max_tokens": 16384,
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 20,
+      "seed": 42
+    },
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 0,
+        "failure": 2
+      },
+      "PASS_TO_PASS": {
+        "success": 117,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    }
+  },
+  {
+    "id": "django__django-14631",
+    "arm": "ink-long",
+    "model": "inkling2-mini-exl3-b70",
+    "seed": 42,
+    "completed": false,
+    "settled": true,
+    "stop": "length",
+    "timed_out": false,
+    "error": "",
+    "seconds": 310.79,
+    "tools": 13,
+    "requests": 14,
+    "resolved": false,
+    "pass_and_returned": false,
+    "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "patch_bytes": 0,
+    "prompt_sha256": "2b1ffefb9375a8af90ba8b3f0bbc135ece82556ac3f613e305d994731d05276a",
+    "compactions": [],
+    "compaction_starts": 0,
+    "first_prompt": 240518,
+    "first_cached": 0,
+    "max_prompt": 258127,
+    "output_tokens": 7816,
+    "first_prefill_tps": 1304.26,
+    "first_decode_tps": 68.51,
+    "first_ttft": 184.7130719550005,
+    "http_errors": [],
+    "effective_profile": {
+      "model": "inkling2-mini-exl3-b70",
+      "reasoning_effort": "medium",
+      "thinking_token_budget": 8192,
+      "max_tokens": 16384,
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 20,
+      "seed": 42
+    },
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 0,
+        "failure": 2
+      },
+      "PASS_TO_PASS": {
+        "success": 117,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    }
+  },
+  {
+    "id": "django__django-14631",
+    "arm": "ink-long-keep4k",
+    "model": "inkling2-mini-exl3-b70",
+    "seed": 42,
+    "completed": true,
+    "settled": true,
+    "stop": "stop",
+    "timed_out": false,
+    "error": "",
+    "seconds": 611.152,
+    "tools": 57,
+    "requests": 59,
+    "resolved": true,
+    "pass_and_returned": true,
+    "patch_sha256": "6f7db2dfe83e81209976d721ad3b6226d355595787c9b67e01b83a65f99ee64f",
+    "patch_bytes": 5078,
+    "prompt_sha256": "2b1ffefb9375a8af90ba8b3f0bbc135ece82556ac3f613e305d994731d05276a",
+    "compactions": [
+      {
+        "reason": "threshold",
+        "aborted": false,
+        "tokensBefore": 246241,
+        "estimatedTokensAfter": 5747,
+        "error": null,
+        "actual_next_prompt_tokens": 6997
+      }
+    ],
+    "compaction_starts": 1,
+    "first_prompt": 240518,
+    "first_cached": 0,
+    "max_prompt": 244952,
+    "output_tokens": 17374,
+    "first_prefill_tps": 1304.03,
+    "first_decode_tps": 68.49,
+    "first_ttft": 184.77420560800056,
+    "http_errors": [],
+    "effective_profile": {
+      "model": "inkling2-mini-exl3-b70",
+      "reasoning_effort": "medium",
+      "thinking_token_budget": 8192,
+      "max_tokens": 16384,
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 20,
+      "seed": 42
+    },
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 117,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    }
+  },
+  {
+    "id": "django__django-14631",
+    "arm": "ink-long-keep4k-s101",
+    "model": "inkling2-mini-exl3-b70",
+    "seed": 101,
+    "completed": true,
+    "settled": true,
+    "stop": "stop",
+    "timed_out": false,
+    "error": "",
+    "seconds": 607.192,
+    "tools": 44,
+    "requests": 46,
+    "resolved": true,
+    "pass_and_returned": true,
+    "patch_sha256": "42e977a998ce37c1658e59cdbfaca6850497ff2ae6231f9f11d16259f222419e",
+    "patch_bytes": 4336,
+    "prompt_sha256": "2b1ffefb9375a8af90ba8b3f0bbc135ece82556ac3f613e305d994731d05276a",
+    "compactions": [
+      {
+        "reason": "threshold",
+        "aborted": false,
+        "tokensBefore": 246065,
+        "estimatedTokensAfter": 5201,
+        "error": null,
+        "actual_next_prompt_tokens": 6285
+      }
+    ],
+    "compaction_starts": 1,
+    "first_prompt": 240518,
+    "first_cached": 0,
+    "max_prompt": 243167,
+    "output_tokens": 15126,
+    "first_prefill_tps": 1302.42,
+    "first_decode_tps": 66.72,
+    "first_ttft": 184.94870240999808,
+    "http_errors": [],
+    "effective_profile": {
+      "model": "inkling2-mini-exl3-b70",
+      "reasoning_effort": "medium",
+      "thinking_token_budget": 8192,
+      "max_tokens": 16384,
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 20,
+      "seed": 101
+    },
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 117,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    }
+  },
+  {
+    "id": "django__django-14631",
+    "arm": "ink-long-s101",
+    "model": "inkling2-mini-exl3-b70",
+    "seed": 101,
+    "completed": false,
+    "settled": true,
+    "stop": "length",
+    "timed_out": false,
+    "error": "",
+    "seconds": 265.522,
+    "tools": 13,
+    "requests": 11,
+    "resolved": false,
+    "pass_and_returned": false,
+    "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "patch_bytes": 0,
+    "prompt_sha256": "2b1ffefb9375a8af90ba8b3f0bbc135ece82556ac3f613e305d994731d05276a",
+    "compactions": [],
+    "compaction_starts": 0,
+    "first_prompt": 240518,
+    "first_cached": 0,
+    "max_prompt": 257583,
+    "output_tokens": 4403,
+    "first_prefill_tps": 1304.13,
+    "first_decode_tps": 66.65,
+    "first_ttft": 184.72487348399954,
+    "http_errors": [],
+    "effective_profile": {
+      "model": "inkling2-mini-exl3-b70",
+      "reasoning_effort": "medium",
+      "thinking_token_budget": 8192,
+      "max_tokens": 16384,
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 20,
+      "seed": 101
+    },
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 0,
+        "failure": 2
+      },
+      "PASS_TO_PASS": {
+        "success": 117,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    }
+  },
+  {
+    "id": "django__django-14631",
+    "arm": "ink-short",
+    "model": "inkling2-mini-exl3-b70",
+    "seed": 42,
+    "completed": true,
+    "settled": true,
+    "stop": "stop",
+    "timed_out": false,
+    "error": "",
+    "seconds": 165.989,
+    "tools": 42,
+    "requests": 43,
+    "resolved": true,
+    "pass_and_returned": true,
+    "patch_sha256": "9d69aa693eea33d94873e194501dda2044dbbc0e0bb9535d6323cbcf2f84cdc0",
+    "patch_bytes": 4559,
+    "prompt_sha256": "1d3f964a6347e618040724052803c6e2011af7a3288f08293494b40da803118d",
+    "compactions": [],
+    "compaction_starts": 0,
+    "first_prompt": 1868,
+    "first_cached": 0,
+    "max_prompt": 34960,
+    "output_tokens": 12156,
+    "first_prefill_tps": 1882.15,
+    "first_decode_tps": 96.66,
+    "first_ttft": 1.059983512999679,
+    "http_errors": [],
+    "effective_profile": {
+      "model": "inkling2-mini-exl3-b70",
+      "reasoning_effort": "medium",
+      "thinking_token_budget": 8192,
+      "max_tokens": 16384,
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 20,
+      "seed": 42
+    },
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 117,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    }
+  },
+  {
+    "id": "django__django-14631",
+    "arm": "qwen-long",
+    "model": "Qwen3.8-27B",
+    "seed": 42,
+    "completed": true,
+    "settled": true,
+    "stop": "stop",
+    "timed_out": false,
+    "error": "",
+    "seconds": 584.973,
+    "tools": 24,
+    "requests": 22,
+    "resolved": true,
+    "pass_and_returned": true,
+    "patch_sha256": "ba1e63c4a872974f154ae800ba2540a0a17cb639a7e3b36df77bd2a1d301f27b",
+    "patch_bytes": 4785,
+    "prompt_sha256": "2b1ffefb9375a8af90ba8b3f0bbc135ece82556ac3f613e305d994731d05276a",
+    "compactions": [],
+    "compaction_starts": 0,
+    "first_prompt": 198579,
+    "first_cached": 0,
+    "max_prompt": 215716,
+    "output_tokens": 13102,
+    "first_prefill_tps": 1007.51,
+    "first_decode_tps": 44.26,
+    "first_ttft": 197.39535060900016,
+    "http_errors": [],
+    "effective_profile": {
+      "model": "Qwen3.8-27B",
+      "thinking_token_budget": 8192,
+      "max_tokens": 16384,
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 20,
+      "seed": 42,
+      "chat_template_kwargs": {
+        "enable_thinking": true,
+        "preserve_thinking": true,
+        "reasoning_effort": "medium"
+      }
+    },
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 117,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    }
+  },
+  {
+    "id": "django__django-14631",
+    "arm": "qwen-short",
+    "model": "Qwen3.8-27B",
+    "seed": 42,
+    "completed": false,
+    "settled": false,
+    "stop": "toolUse",
+    "timed_out": true,
+    "error": "",
+    "seconds": 480.065,
+    "tools": 40,
+    "requests": 34,
+    "resolved": true,
+    "pass_and_returned": false,
+    "patch_sha256": "a5d1ce81c87635ac0abcf66954372ceab93f550e9200e014dd20ffc37f02fade",
+    "patch_bytes": 4070,
+    "prompt_sha256": "1d3f964a6347e618040724052803c6e2011af7a3288f08293494b40da803118d",
+    "compactions": [],
+    "compaction_starts": 0,
+    "first_prompt": 1753,
+    "first_cached": 0,
+    "max_prompt": 37283,
+    "output_tokens": 26355,
+    "first_prefill_tps": 2092.1,
+    "first_decode_tps": 71.42,
+    "first_ttft": 0.8550066659990989,
+    "http_errors": [],
+    "effective_profile": {
+      "model": "Qwen3.8-27B",
+      "thinking_token_budget": 8192,
+      "max_tokens": 16384,
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 20,
+      "seed": 42,
+      "chat_template_kwargs": {
+        "enable_thinking": true,
+        "preserve_thinking": true,
+        "reasoning_effort": "medium"
+      }
+    },
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 117,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    }
+  }
+]

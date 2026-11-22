@@ -1,0 +1,130 @@
+{
+  "selection": "Lowest SHA256 of b70-quality-20261122: plus instance ID by repository, excluding all September pilot cases. Four Django, four SymPy, two Requests. The separate long case exercises Django forms and bound fields.",
+  "parquet_sha256": "030cfd7f2a704c4c0226e7f104c725a3b41230b1d3517f9c915ad7ea5be3fa25",
+  "sampling": {
+    "seed": 42,
+    "temperature": 1,
+    "top_p": 0.95,
+    "top_k": 20,
+    "effort": "medium",
+    "thinking_budget": 8192,
+    "max_output": 16384
+  },
+  "tasks": [
+    {
+      "instance_id": "django__django-10880",
+      "repo": "django/django",
+      "base_commit": "838e432e3e5519c5383d12018e6c78f8ec7833c1",
+      "image": "swebench/sweb.eval.x86_64.django_1776_django-10880:latest",
+      "difficulty": "<15 min fix",
+      "kind": "panel",
+      "issue_sha256": "d554ba8ef84e2e4dc22c291d413e4cb58070d5d730dae3aca383a4cdb77c20b2"
+    },
+    {
+      "instance_id": "django__django-13344",
+      "repo": "django/django",
+      "base_commit": "e39e727ded673e74016b5d3658d23cbe20234d11",
+      "image": "swebench/sweb.eval.x86_64.django_1776_django-13344:latest",
+      "difficulty": "1-4 hours",
+      "kind": "panel",
+      "issue_sha256": "fa0d64caaae3c17b9e52c447593c2c8ac3354046b1df2ceb293645b293b06090"
+    },
+    {
+      "instance_id": "django__django-16938",
+      "repo": "django/django",
+      "base_commit": "1136aa5005f0ae70fea12796b7e37d6f027b9263",
+      "image": "swebench/sweb.eval.x86_64.django_1776_django-16938:latest",
+      "difficulty": "15 min - 1 hour",
+      "kind": "panel",
+      "issue_sha256": "df77a03b1d4dc247eb9cb80cd7a2d98d9b6f63f3036e1a3d65431ff0edc39d39"
+    },
+    {
+      "instance_id": "django__django-14238",
+      "repo": "django/django",
+      "base_commit": "30e123ed351317b7527f632b3b7dc4e81e850449",
+      "image": "swebench/sweb.eval.x86_64.django_1776_django-14238:latest",
+      "difficulty": "15 min - 1 hour",
+      "kind": "panel",
+      "issue_sha256": "ee71cd2bf018f9b6642fe511b99cd64cebaf60a85abc709d87d65ee2c97a2ffd"
+    },
+    {
+      "instance_id": "sympy__sympy-24443",
+      "repo": "sympy/sympy",
+      "base_commit": "809c53c077485ca48a206cee78340389cb83b7f1",
+      "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24443:latest",
+      "difficulty": "15 min - 1 hour",
+      "kind": "panel",
+      "issue_sha256": "465efb86a6aacc25222e99cb78b1cdd86248af5a67b27ae1c4a043c1c126c0d4"
+    },
+    {
+      "instance_id": "sympy__sympy-21930",
+      "repo": "sympy/sympy",
+      "base_commit": "de446c6d85f633271dfec1452f6f28ea783e293f",
+      "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21930:latest",
+      "difficulty": "15 min - 1 hour",
+      "kind": "panel",
+      "issue_sha256": "867fbad616cdb7324c99258b4bd7ad7f6b4a2fb66f7945b669f9ae279ad38535"
+    },
+    {
+      "instance_id": "sympy__sympy-24539",
+      "repo": "sympy/sympy",
+      "base_commit": "193e3825645d93c73e31cdceb6d742cc6919624d",
+      "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24539:latest",
+      "difficulty": "<15 min fix",
+      "kind": "panel",
+      "issue_sha256": "c45c55bcffb2b526d21ed6b0c8d19976455280d6ce9343f7f2d62d96c3d3e037"
+    },
+    {
+      "instance_id": "sympy__sympy-17139",
+      "repo": "sympy/sympy",
+      "base_commit": "1d3327b8e90a186df6972991963a5ae87053259d",
+      "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-17139:latest",
+      "difficulty": "<15 min fix",
+      "kind": "panel",
+      "issue_sha256": "17e532f00dac2a0e2aae1ca47a21c4be3cc3d4686da16dfc58ed0d69f6c02334"
+    },
+    {
+      "instance_id": "psf__requests-5414",
+      "repo": "psf/requests",
+      "base_commit": "39d0fdd9096f7dceccbc8f82e1eda7dd64717a8e",
+      "image": "swebench/sweb.eval.x86_64.psf_1776_requests-5414:latest",
+      "difficulty": "<15 min fix",
+      "kind": "panel",
+      "issue_sha256": "08faa0ea47836476b5f4b3709c06a00569996ccc654011299f9c8587cd7007ba"
+    },
+    {
+      "instance_id": "psf__requests-1142",
+      "repo": "psf/requests",
+      "base_commit": "22623bd8c265b78b161542663ee980738441c307",
+      "image": "swebench/sweb.eval.x86_64.psf_1776_requests-1142:latest",
+      "difficulty": "<15 min fix",
+      "kind": "panel",
+      "issue_sha256": "0192533ff2ef0c53a600b3ef02cb9dc20bf0998d56eeaee80ca1a76c46758eec"
+    },
+    {
+      "instance_id": "django__django-14631",
+      "repo": "django/django",
+      "base_commit": "84400d2e9db7c51fee4e9bb04c028f665b8e7624",
+      "image": "swebench/sweb.eval.x86_64.django_1776_django-14631:latest",
+      "difficulty": "1-4 hours",
+      "kind": "long",
+      "issue_sha256": "1d3f964a6347e618040724052803c6e2011af7a3288f08293494b40da803118d"
+    }
+  ],
+  "official_grader_revision": "02e7a74ffd0b707aab73d203fe87bdc7c76afc8e",
+  "agent_wall_seconds": 480,
+  "long_wall_seconds": 900,
+  "max_turns": 64,
+  "primary": "Hidden official test resolution. Report a second score requiring a natural final answer within the task deadline, all-attempt wall time, successful task wall time and output tokens.",
+  "challenger": "Same adaptive Inkling weights, kernels, sampling and shell as baseline. Adds instructions to reproduce, inspect callers, test an adjacent case, and finish promptly. Compare all ten prespecified instances paired; same issue used by the two primary arms.",
+  "long": "Same issue with and without the source corpus on production Qwen and adaptive Inkling. Additional fixed-width Inkling long run. Cold prefix per task, 650 tok/s prefill guard; context limits 262144.",
+  "replication": {
+    "seed": 101,
+    "cases": [
+      "django__django-14238",
+      "sympy__sympy-24443",
+      "psf__requests-1142"
+    ],
+    "selection": "One per repository from cases still unseen at 10:37 Berlin; lowest SHA256 of b70-quality-replication: plus instance ID. Repeat both Inkling instruction variants with independent fresh checkouts. Report separately from the main ten."
+  }
+}

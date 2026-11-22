@@ -1,0 +1,46 @@
+{
+  "django__django-10880": {
+    "image": "swebench/sweb.eval.x86_64.django_1776_django-10880@sha256:94e6ba5d96b1a1db8bc6fd117c03728d6a7453ddb723dc4484f48bd22efc968d",
+    "config_digest": "sha256:28ddc96a8d99cdfa2bdf1d86bb2d427ebae489b943f3c4142122f45253cb8d13"
+  },
+  "django__django-13344": {
+    "image": "swebench/sweb.eval.x86_64.django_1776_django-13344@sha256:bb7a5fef7132badf4cc18c9ae47d3f1fbc8f9102c447772d0c5fa0b27d85fad4",
+    "config_digest": "sha256:2536b147b7da2dc94686bdf36e1cdbf10843d42cc88856225c145cd200a14514"
+  },
+  "django__django-16938": {
+    "image": "swebench/sweb.eval.x86_64.django_1776_django-16938@sha256:f4346d8fc89a1359ed5ee8429d408ed645f7f8db97ba347ab8d77bfd59e67a4f",
+    "config_digest": "sha256:6053bc590482932a0c62acedb5f94df950f2d871612b2b7af9a009cf5010274c"
+  },
+  "django__django-14238": {
+    "image": "swebench/sweb.eval.x86_64.django_1776_django-14238@sha256:ce30418a2b0599fa84ce4541450586010fab2d23a5da4cfe70770f304d289780",
+    "config_digest": "sha256:2633b9a754a4e19d263d6462c91d90a1639273646314e0c1145f574936937aae"
+  },
+  "sympy__sympy-24443": {
+    "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24443@sha256:0d6610c1dd6f38eb68ee0923a74aebc6103fabc063f5cceec45a4cc0cb8a8cd4",
+    "config_digest": "sha256:68d0df8f3ba8d80b782fd5b19eaa9c21d89ec68eee773896dfbf0d5aac14617a"
+  },
+  "sympy__sympy-21930": {
+    "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21930@sha256:ac9b1c65d632e5a3d1af240db144ff27ed9a70b5507705d50480ede6899125d1",
+    "config_digest": "sha256:9dbbee272ee911637e9a57f8c0c8b54257478b6e5a193f5030605fb7a080be4a"
+  },
+  "sympy__sympy-24539": {
+    "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24539@sha256:b6303273066473c21cbf7b97d26f6bb214a5a24ebe6c65b8f26234e3315f7a4b",
+    "config_digest": "sha256:75c6c7fb5d9e9dc67d9230b49f5351278b434e1e9fd53d4f1ef01d8d83004075"
+  },
+  "sympy__sympy-17139": {
+    "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-17139@sha256:9a8111742e0548816d920a27ba259ebde7647f4e46e7522c61647990dd35713c",
+    "config_digest": "sha256:05bd322eebbc03124d5701f89047cf0c91c6905c87506c581cd40d8540bb9a48"
+  },
+  "psf__requests-5414": {
+    "image": "swebench/sweb.eval.x86_64.psf_1776_requests-5414@sha256:71c78211f16803c111ed1807ded20f8defd5f6917fb958ace4e076d5ea7d8b10",
+    "config_digest": "sha256:ff5caf954ad336865c3614fa0157f383a8e80c40ec802625347d119e3e33965e"
+  },
+  "psf__requests-1142": {
+    "image": "swebench/sweb.eval.x86_64.psf_1776_requests-1142@sha256:b2733e57feb4cfaeac24ab5ec496d4cb89a37db53bd0ca72eaededdb2ce19d1c",
+    "config_digest": "sha256:ebfed0b9a44723b3ab1e934f0b040f843abf01e1a3a8b248e150d314e949cfaa"
+  },
+  "django__django-14631": {
+    "image": "swebench/sweb.eval.x86_64.django_1776_django-14631@sha256:bf4d29a9b9f54559d7a3ffadba03e462a97f8022cf536cb064b8804ed95cccc1",
+    "config_digest": "sha256:d8117c513c689dec4730707dde0b3ade0c4b1768d266208d3937e04ad37c4774"
+  }
+}

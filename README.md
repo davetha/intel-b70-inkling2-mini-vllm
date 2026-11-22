@@ -6,6 +6,8 @@ experts and native SYCL kernels. The vLLM endpoint supports ordinary decoding,
 the checkpoint's DSpark drafter, streamed tool calls and single-sequence
 prefix reuse. A second recipe runs the Unsloth 4-bit GGUF in llama.cpp.
 
+For a Pi Coding Agent session that starts close to the 262,144-token limit, set `compaction.keepRecentTokens` to `4096` in the session profile and leave `reserveTokens` at `16384`. On one blind Django repair with 240,518 initial Inkling tokens, both seeds compacted and passed the official tests. With the default 20,000-token retention, both seeds exhausted the window. Medium reasoning and the 8,192-token thinking budget were active in all four runs. [Measured Pi settings and outcomes](benchmarks/2026-11-22/quality/long-pi.md)
+
 ## Validated profile
 
 | Setting | Reference configuration |
