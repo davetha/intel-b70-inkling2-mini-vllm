@@ -12,6 +12,8 @@ For a Pi Coding Agent session that starts close to the 262,144-token limit, set 
 
 For faster prompt processing with adaptive DSpark, append `--max-num-batched-tokens 4096` to the coding launcher. On the B70 this improved cold prefill by 3.5–3.8% across 4.8K, 16.6K and 31.4K input tokens through Pi. At 31.4K, median time to first output fell from 18.44 to 17.77 seconds. At 240,518 tokens it saved 8.94 seconds of prefill. The long coding repair passed with both settings and took longer overall with the larger chunk. [Qwen comparison, Strata Intel kernels and replay](benchmarks/2026-11-22/prefill/README.md)
 
+For text sessions with frequent medium-length cold prompts, set `INKLING2_VLLM_BATCH=6144` when starting the coding launcher. At 16,635 input tokens this reduced median first-output latency from 10.30 to 9.23 seconds compared with 4,096. At 31,376 tokens the difference was 0.15 seconds, with 1.31 GiB less free VRAM. The 4,096 setting has the 240K repair qualification. [Scheduler measurements and Pi results](benchmarks/2026-11-22/prefill/chunk-sweep.md)
+
 ## Validated profile
 
 | Setting | Reference configuration |
