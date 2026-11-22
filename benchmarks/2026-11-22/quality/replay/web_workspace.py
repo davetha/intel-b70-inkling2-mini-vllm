@@ -6,7 +6,8 @@ DATASET = "SWE-bench/SWE-bench_Multilingual"
 PREPARE = """
 set -eu
 cd /testbed
-git -c safe.directory=/testbed checkout -q --detach "$1"
+# The image build can modify tracked manifests. Restore them in this fresh volume.
+git -c safe.directory=/testbed checkout -q --force --detach "$1"
 git -c safe.directory=/testbed clean -ffd -q
 git -c safe.directory=/testbed diff --quiet "$1" --
 expected=$(git -c safe.directory=/testbed rev-parse "$1^{tree}")
