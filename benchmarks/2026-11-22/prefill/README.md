@@ -1,5 +1,7 @@
 # Inkling prefill on one Intel Arc Pro B70
 
+The [original-checkpoint B70 comparison](cookbook.md) covers the cookbook’s 9.84-second cold 32K prefill, transferable kernel changes and measured context limits with DSpark.
+
 ## What Strata v0.2.19 measured
 
 The highest published RTX 5090 prompt result is 11,306 tokens/s with the SQ-20 pack. The explicitly labeled 2K result is 8,722 tokens/s. SQ-20 coding decode is 198.9 tokens/s for one request and output throughput is 4,089.7 tokens/s across 64 requests. The release lists 159.2 tokens/s for B70 DSpark output. It gives no B70 prefill timing, prompt length for the B70 entry or equivalent Pi coding run. The model card describes thinking-disabled measurements. The release also optimizes Qwen3.8-Flash-Next, a separate model from the local Qwen3.8-27B reference. [Release](https://github.com/Niko1221/Strata/releases/tag/v0.2.19) · [Model card and timing table](https://huggingface.co/strata-engine/Inkling-2-Mini-Strata)
