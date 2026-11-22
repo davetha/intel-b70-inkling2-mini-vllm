@@ -1,0 +1,1604 @@
+[
+  {
+    "id": "django__django-10880",
+    "seed": 42,
+    "wall_seconds": 120.76700620100019,
+    "completed": true,
+    "error": "",
+    "tools": 40,
+    "output_tokens": 8487,
+    "prompt_sha256": "b2babab69218c24878883f8f7ea4bac3d2cfdd85924183d09cd56895d19ec0cd",
+    "patch_sha256": "4113852402f7cbfcdae5820f3a8e13fef3700732d02d3a0576a17fac5af99365",
+    "patch_bytes": 633,
+    "arm": "ink",
+    "turns": 41,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 55,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 292,
+    "max_prompt": 26066,
+    "first_cached": 0,
+    "reasoning_tokens": 3949,
+    "max_thinking_per_turn": 1169,
+    "approx_engine_decode_tps": 92.59,
+    "proposals": 7151.0,
+    "accepted": 5431.0,
+    "verify_rounds": 3047.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 8487,
+    "engine_uncached_input": 18774,
+    "completed_request_seconds": 113.288,
+    "prefill_engine_seconds": 20.949,
+    "decode_engine_seconds": 91.215
+  },
+  {
+    "id": "django__django-10880",
+    "seed": 42,
+    "wall_seconds": 100.20447813999999,
+    "completed": true,
+    "error": "",
+    "tools": 30,
+    "output_tokens": 7418,
+    "prompt_sha256": "789b6253c2810593749c6033402c4afdd55e92cbb2020e06c1411886de0d6a97",
+    "patch_sha256": "b188ba3364e35c5b77c67ad5eb8199c4aecbd808710f49bc1f9fb9de658491c3",
+    "patch_bytes": 1381,
+    "arm": "ink-focused",
+    "turns": 31,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 55,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 338,
+    "max_prompt": 20500,
+    "first_cached": 0,
+    "reasoning_tokens": 2086,
+    "max_thinking_per_turn": 603,
+    "approx_engine_decode_tps": 94.8,
+    "proposals": 6271.0,
+    "accepted": 4851.0,
+    "verify_rounds": 2563.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 7418,
+    "engine_uncached_input": 13861,
+    "completed_request_seconds": 93.274,
+    "prefill_engine_seconds": 13.442,
+    "decode_engine_seconds": 77.918
+  },
+  {
+    "id": "django__django-10880",
+    "seed": 42,
+    "wall_seconds": 196.9982177689999,
+    "completed": true,
+    "error": "",
+    "tools": 24,
+    "output_tokens": 10465,
+    "prompt_sha256": "b2babab69218c24878883f8f7ea4bac3d2cfdd85924183d09cd56895d19ec0cd",
+    "patch_sha256": "4113852402f7cbfcdae5820f3a8e13fef3700732d02d3a0576a17fac5af99365",
+    "patch_bytes": 633,
+    "arm": "qwen",
+    "turns": 22,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 55,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 445,
+    "max_prompt": 14193,
+    "first_cached": 0,
+    "reasoning_tokens": 7725,
+    "max_thinking_per_turn": 3814,
+    "approx_engine_decode_tps": 62.5,
+    "proposals": 11700.0,
+    "accepted": 6575.0,
+    "verify_rounds": 3900.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 10465,
+    "engine_uncached_input": 18086,
+    "completed_request_seconds": 183.689,
+    "prefill_engine_seconds": 16.228,
+    "decode_engine_seconds": 167.083
+  },
+  {
+    "id": "django__django-13344",
+    "seed": 42,
+    "wall_seconds": 367.45074553899985,
+    "completed": true,
+    "error": "",
+    "tools": 39,
+    "output_tokens": 29830,
+    "prompt_sha256": "eedacf1c6c7521ab8adeba74873108371e3f206387bc195eb5cb7ac4e05438ba",
+    "patch_sha256": "30804181778f1d0727b4cba0003232a0eb242c37b8ddc70a4295875297751819",
+    "patch_bytes": 1183,
+    "arm": "ink",
+    "turns": 40,
+    "resolved": false,
+    "complete_and_resolved": false,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 0,
+        "failure": 2
+      },
+      "PASS_TO_PASS": {
+        "success": 356,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 601,
+    "max_prompt": 52057,
+    "first_cached": 0,
+    "reasoning_tokens": 23372,
+    "max_thinking_per_turn": 7825,
+    "approx_engine_decode_tps": 90.41,
+    "proposals": 24793.0,
+    "accepted": 19210.0,
+    "verify_rounds": 10608.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 29830,
+    "engine_uncached_input": 24116,
+    "completed_request_seconds": 353.403,
+    "prefill_engine_seconds": 20.49,
+    "decode_engine_seconds": 329.498
+  },
+  {
+    "id": "django__django-13344",
+    "seed": 42,
+    "wall_seconds": 330.07882944699986,
+    "completed": true,
+    "error": "",
+    "tools": 50,
+    "output_tokens": 23756,
+    "prompt_sha256": "2ca4a6a0940ae7c827ab58378f4871b618f92913d6c36ea865283d0decf3c650",
+    "patch_sha256": "ed2fc9a410a2a620bb1463cb007369b0fb422e2648992c80f3bd358c0cd7ef64",
+    "patch_bytes": 2028,
+    "arm": "ink-focused",
+    "turns": 51,
+    "resolved": false,
+    "complete_and_resolved": false,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 0,
+        "failure": 2
+      },
+      "PASS_TO_PASS": {
+        "success": 356,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 647,
+    "max_prompt": 49535,
+    "first_cached": 0,
+    "reasoning_tokens": 14709,
+    "max_thinking_per_turn": 3021,
+    "approx_engine_decode_tps": 92.16,
+    "proposals": 19899.0,
+    "accepted": 15460.0,
+    "verify_rounds": 8294.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 23756,
+    "engine_uncached_input": 26744,
+    "completed_request_seconds": 288.416,
+    "prefill_engine_seconds": 26.313,
+    "decode_engine_seconds": 257.203
+  },
+  {
+    "id": "django__django-13344",
+    "seed": 42,
+    "wall_seconds": 480.0069419299998,
+    "completed": false,
+    "error": "timed out",
+    "tools": 41,
+    "output_tokens": 24911,
+    "prompt_sha256": "eedacf1c6c7521ab8adeba74873108371e3f206387bc195eb5cb7ac4e05438ba",
+    "patch_sha256": "b7d2c71d2b338883d0ee05675a4dcf2b9c4b7230fceb2ad17914974483f81f8c",
+    "patch_bytes": 2222,
+    "arm": "qwen",
+    "turns": 39,
+    "resolved": false,
+    "complete_and_resolved": false,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 0,
+        "failure": 2
+      },
+      "PASS_TO_PASS": {
+        "success": 356,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 697,
+    "max_prompt": 39677,
+    "first_cached": 0,
+    "reasoning_tokens": 20119,
+    "max_thinking_per_turn": 3767,
+    "approx_engine_decode_tps": 58.23,
+    "proposals": 28713.0,
+    "accepted": 15747.0,
+    "verify_rounds": 9571.0,
+    "stop_reason": "wall_limit",
+    "engine_generated": 25292,
+    "engine_uncached_input": 46018,
+    "completed_request_seconds": 469.828,
+    "prefill_engine_seconds": 41.597,
+    "decode_engine_seconds": 427.1
+  },
+  {
+    "id": "django__django-16938",
+    "seed": 42,
+    "wall_seconds": 318.02287803000036,
+    "completed": false,
+    "error": "",
+    "tools": 64,
+    "output_tokens": 24629,
+    "prompt_sha256": "61885eb64f30740ccfb4599c1f06dc3f947ece6e597a4a64f2f92f97571531f9",
+    "patch_sha256": "d879fac6f1aa488012d7c164713ece0e949fd593e539f7a496346431d0fa8d29",
+    "patch_bytes": 1793,
+    "arm": "ink",
+    "turns": 64,
+    "resolved": false,
+    "complete_and_resolved": false,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 15,
+        "failure": 8
+      },
+      "PASS_TO_PASS": {
+        "success": 65,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 1557,
+    "max_prompt": 60081,
+    "first_cached": 0,
+    "reasoning_tokens": 13235,
+    "max_thinking_per_turn": 2164,
+    "approx_engine_decode_tps": 90.26,
+    "proposals": 20155.0,
+    "accepted": 15762.0,
+    "verify_rounds": 8861.0,
+    "stop_reason": "turn_limit",
+    "engine_generated": 24629,
+    "engine_uncached_input": 36600,
+    "completed_request_seconds": 309.33,
+    "prefill_engine_seconds": 31.222,
+    "decode_engine_seconds": 272.167
+  },
+  {
+    "id": "django__django-16938",
+    "seed": 42,
+    "wall_seconds": 174.7587833690004,
+    "completed": true,
+    "error": "",
+    "tools": 49,
+    "output_tokens": 12807,
+    "prompt_sha256": "a930ad5c0f008c134d29284cc66722a1aea8d16c447cbac990599b1ba0d1d635",
+    "patch_sha256": "0e5832103ff47aef6d0acbe417012a77283d45e88234f8354ec9d68f364a0516",
+    "patch_bytes": 5292,
+    "arm": "ink-focused",
+    "turns": 50,
+    "resolved": false,
+    "complete_and_resolved": false,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 15,
+        "failure": 8
+      },
+      "PASS_TO_PASS": {
+        "success": 65,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 1603,
+    "max_prompt": 38645,
+    "first_cached": 0,
+    "reasoning_tokens": 5382,
+    "max_thinking_per_turn": 709,
+    "approx_engine_decode_tps": 93.63,
+    "proposals": 10756.0,
+    "accepted": 8374.0,
+    "verify_rounds": 4426.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 12807,
+    "engine_uncached_input": 26926,
+    "completed_request_seconds": 164.83,
+    "prefill_engine_seconds": 25.372,
+    "decode_engine_seconds": 136.249
+  },
+  {
+    "id": "django__django-16938",
+    "seed": 42,
+    "wall_seconds": 480.00601954100057,
+    "completed": false,
+    "error": "timed out",
+    "tools": 42,
+    "output_tokens": 24179,
+    "prompt_sha256": "61885eb64f30740ccfb4599c1f06dc3f947ece6e597a4a64f2f92f97571531f9",
+    "patch_sha256": "5a342c90453c738bf78ecef95072da57605bd7eef41c42a15ef189082a2538a0",
+    "patch_bytes": 1985,
+    "arm": "qwen",
+    "turns": 32,
+    "resolved": false,
+    "complete_and_resolved": false,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 15,
+        "failure": 8
+      },
+      "PASS_TO_PASS": {
+        "success": 65,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 1453,
+    "max_prompt": 44315,
+    "first_cached": 0,
+    "reasoning_tokens": 19345,
+    "max_thinking_per_turn": 2478,
+    "approx_engine_decode_tps": 56.74,
+    "proposals": 28452.0,
+    "accepted": 14798.0,
+    "verify_rounds": 9484.0,
+    "stop_reason": "wall_limit",
+    "engine_generated": 24290,
+    "engine_uncached_input": 51048,
+    "completed_request_seconds": 468.519,
+    "prefill_engine_seconds": 41.768,
+    "decode_engine_seconds": 425.596
+  },
+  {
+    "id": "django__django-14238",
+    "seed": 42,
+    "wall_seconds": 44.898115073000554,
+    "completed": true,
+    "error": "",
+    "tools": 17,
+    "output_tokens": 3241,
+    "prompt_sha256": "85bc3a5c4ce51b03b562d7efc46650b0e5fd565ecbec2977af1d6edbdf16eb4d",
+    "patch_sha256": "5c1accdbd684584c165998ca907c038644dd24fda3b76ce79e83684dd97c3343",
+    "patch_bytes": 645,
+    "arm": "ink",
+    "turns": 18,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 39,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 1162,
+    "max_prompt": 9255,
+    "first_cached": 0,
+    "reasoning_tokens": 827,
+    "max_thinking_per_turn": 272,
+    "approx_engine_decode_tps": 97.78,
+    "proposals": 2752.0,
+    "accepted": 2144.0,
+    "verify_rounds": 1095.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 3241,
+    "engine_uncached_input": 6609,
+    "completed_request_seconds": 40.489,
+    "prefill_engine_seconds": 6.929,
+    "decode_engine_seconds": 32.962
+  },
+  {
+    "id": "django__django-14238",
+    "seed": 42,
+    "wall_seconds": 38.828651623999576,
+    "completed": true,
+    "error": "",
+    "tools": 13,
+    "output_tokens": 2783,
+    "prompt_sha256": "c6681a7709f6b9582662ec7e35d3382044130df69fdb634deacc2dfcf695a2be",
+    "patch_sha256": "5c1accdbd684584c165998ca907c038644dd24fda3b76ce79e83684dd97c3343",
+    "patch_bytes": 645,
+    "arm": "ink-focused",
+    "turns": 14,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 39,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 1208,
+    "max_prompt": 6137,
+    "first_cached": 0,
+    "reasoning_tokens": 751,
+    "max_thinking_per_turn": 356,
+    "approx_engine_decode_tps": 95.33,
+    "proposals": 2394.0,
+    "accepted": 1810.0,
+    "verify_rounds": 972.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 2783,
+    "engine_uncached_input": 3934,
+    "completed_request_seconds": 34.675,
+    "prefill_engine_seconds": 5.256,
+    "decode_engine_seconds": 29.048
+  },
+  {
+    "id": "django__django-14238",
+    "seed": 42,
+    "wall_seconds": 196.39089836200037,
+    "completed": true,
+    "error": "",
+    "tools": 21,
+    "output_tokens": 11108,
+    "prompt_sha256": "85bc3a5c4ce51b03b562d7efc46650b0e5fd565ecbec2977af1d6edbdf16eb4d",
+    "patch_sha256": "8b66df6760f9a4be44e8fbd28b2a5e558214d016bf8eaa0dd883038837901af0",
+    "patch_bytes": 699,
+    "arm": "qwen",
+    "turns": 22,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 39,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 1122,
+    "max_prompt": 15078,
+    "first_cached": 0,
+    "reasoning_tokens": 8258,
+    "max_thinking_per_turn": 2102,
+    "approx_engine_decode_tps": 64.52,
+    "proposals": 12054.0,
+    "accepted": 7103.0,
+    "verify_rounds": 4018.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 11108,
+    "engine_uncached_input": 19284,
+    "completed_request_seconds": 190.722,
+    "prefill_engine_seconds": 18.504,
+    "decode_engine_seconds": 171.822
+  },
+  {
+    "id": "sympy__sympy-24443",
+    "seed": 42,
+    "wall_seconds": 339.6484922159998,
+    "completed": true,
+    "error": "",
+    "tools": 47,
+    "output_tokens": 26036,
+    "prompt_sha256": "24b2dbc14ee13dd1c6631bfac83a93864d10c82f7e64bbc91a3e510d75f5e53d",
+    "patch_sha256": "2e804d7aa43d5826d6775d6120229149ce69608ccfc0300a0b9d68215c936401",
+    "patch_bytes": 2356,
+    "arm": "ink",
+    "turns": 48,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 452,
+    "max_prompt": 47375,
+    "first_cached": 0,
+    "reasoning_tokens": 19122,
+    "max_thinking_per_turn": 3105,
+    "approx_engine_decode_tps": 91.0,
+    "proposals": 21779.0,
+    "accepted": 16762.0,
+    "verify_rounds": 9256.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 26036,
+    "engine_uncached_input": 22288,
+    "completed_request_seconds": 311.968,
+    "prefill_engine_seconds": 23.549,
+    "decode_engine_seconds": 285.589
+  },
+  {
+    "id": "sympy__sympy-24443",
+    "seed": 42,
+    "wall_seconds": 200.6852696899996,
+    "completed": true,
+    "error": "",
+    "tools": 34,
+    "output_tokens": 15473,
+    "prompt_sha256": "44a6b259f52602dba3650da3ddaa36bc178b94e59ecb9456e7c28b833becf103",
+    "patch_sha256": "80cd4ba5fc7095dde09a438167bbf3322ed02929438744d0d1287140b450c938",
+    "patch_bytes": 2513,
+    "arm": "ink-focused",
+    "turns": 35,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 498,
+    "max_prompt": 28273,
+    "first_cached": 0,
+    "reasoning_tokens": 8845,
+    "max_thinking_per_turn": 1660,
+    "approx_engine_decode_tps": 93.82,
+    "proposals": 12880.0,
+    "accepted": 10000.0,
+    "verify_rounds": 5455.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 15473,
+    "engine_uncached_input": 13500,
+    "completed_request_seconds": 183.443,
+    "prefill_engine_seconds": 16.357,
+    "decode_engine_seconds": 164.552
+  },
+  {
+    "id": "sympy__sympy-24443",
+    "seed": 42,
+    "wall_seconds": 479.26020128300024,
+    "completed": false,
+    "error": "task deadline",
+    "tools": 28,
+    "output_tokens": 14619,
+    "prompt_sha256": "24b2dbc14ee13dd1c6631bfac83a93864d10c82f7e64bbc91a3e510d75f5e53d",
+    "patch_sha256": "16f7431229ae58261a684cbd018e658336e82024262677e589a36137ae2e73ca",
+    "patch_bytes": 2728,
+    "arm": "qwen",
+    "turns": 25,
+    "resolved": true,
+    "complete_and_resolved": false,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 619,
+    "max_prompt": 22507,
+    "first_cached": 0,
+    "reasoning_tokens": 9873,
+    "max_thinking_per_turn": 2286,
+    "approx_engine_decode_tps": 63.46,
+    "proposals": 15909.0,
+    "accepted": 9330.0,
+    "verify_rounds": 5303.0,
+    "stop_reason": "wall_limit",
+    "engine_generated": 14619,
+    "engine_uncached_input": 27222,
+    "completed_request_seconds": 255.348,
+    "prefill_engine_seconds": 24.799,
+    "decode_engine_seconds": 229.983
+  },
+  {
+    "id": "sympy__sympy-21930",
+    "seed": 42,
+    "wall_seconds": 369.03523255299933,
+    "completed": true,
+    "error": "",
+    "tools": 49,
+    "output_tokens": 26864,
+    "prompt_sha256": "a39c6fca7012fb48f6da1fa8187a7246cdbe84568f1cdac53dcb63497e8c2bdb",
+    "patch_sha256": "1015c91308ad85cfedc052478566e3f607714f7de01c5b1ec9bb8c174c045485",
+    "patch_bytes": 1895,
+    "arm": "ink",
+    "turns": 50,
+    "resolved": false,
+    "complete_and_resolved": false,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 5
+      },
+      "PASS_TO_PASS": {
+        "success": 45,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 465,
+    "max_prompt": 48030,
+    "first_cached": 0,
+    "reasoning_tokens": 19174,
+    "max_thinking_per_turn": 2916,
+    "approx_engine_decode_tps": 89.14,
+    "proposals": 22470.0,
+    "accepted": 16981.0,
+    "verify_rounds": 9878.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 26864,
+    "engine_uncached_input": 22280,
+    "completed_request_seconds": 325.699,
+    "prefill_engine_seconds": 22.017,
+    "decode_engine_seconds": 300.82
+  },
+  {
+    "id": "sympy__sympy-21930",
+    "seed": 42,
+    "wall_seconds": 420.7253378149999,
+    "completed": false,
+    "error": "",
+    "tools": 64,
+    "output_tokens": 30274,
+    "prompt_sha256": "d0c6eb0771890157ed413c32d45ed206ef59099c483431930d7a1d0e2a686c40",
+    "patch_sha256": "a5a2b5cc79825b60ccf3ca6a21c6308268797c72827fbc42fa13f05dccd1ec8b",
+    "patch_bytes": 1003,
+    "arm": "ink-focused",
+    "turns": 64,
+    "resolved": false,
+    "complete_and_resolved": false,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 5
+      },
+      "PASS_TO_PASS": {
+        "success": 44,
+        "failure": 1
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 511,
+    "max_prompt": 65066,
+    "first_cached": 0,
+    "reasoning_tokens": 24903,
+    "max_thinking_per_turn": 2975,
+    "approx_engine_decode_tps": 84.05,
+    "proposals": 25304.0,
+    "accepted": 18588.0,
+    "verify_rounds": 11678.0,
+    "stop_reason": "turn_limit",
+    "engine_generated": 30274,
+    "engine_uncached_input": 35396,
+    "completed_request_seconds": 394.194,
+    "prefill_engine_seconds": 32.094,
+    "decode_engine_seconds": 359.422
+  },
+  {
+    "id": "sympy__sympy-21930",
+    "seed": 42,
+    "wall_seconds": 363.35771287699936,
+    "completed": true,
+    "error": "",
+    "tools": 36,
+    "output_tokens": 15563,
+    "prompt_sha256": "a39c6fca7012fb48f6da1fa8187a7246cdbe84568f1cdac53dcb63497e8c2bdb",
+    "patch_sha256": "a7425c6e557d6a2ee2d0d8fd403864065d76c47d6004f259a2f77cdeea4dbf46",
+    "patch_bytes": 1404,
+    "arm": "qwen",
+    "turns": 30,
+    "resolved": false,
+    "complete_and_resolved": false,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 5
+      },
+      "PASS_TO_PASS": {
+        "success": 45,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 587,
+    "max_prompt": 24400,
+    "first_cached": 0,
+    "reasoning_tokens": 11382,
+    "max_thinking_per_turn": 1996,
+    "approx_engine_decode_tps": 61.94,
+    "proposals": 17304.0,
+    "accepted": 9802.0,
+    "verify_rounds": 5768.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 15563,
+    "engine_uncached_input": 29831,
+    "completed_request_seconds": 279.383,
+    "prefill_engine_seconds": 27.973,
+    "decode_engine_seconds": 250.759
+  },
+  {
+    "id": "sympy__sympy-24539",
+    "seed": 42,
+    "wall_seconds": 17.022299301999738,
+    "completed": true,
+    "error": "",
+    "tools": 7,
+    "output_tokens": 1241,
+    "prompt_sha256": "d099343c9c1a718a0cd9fb66aa233c40690758fd2d1c6d4cc88ce5b7a4859d7d",
+    "patch_sha256": "ca1284753bce7427fbb817ac53acd1c7adb2b4e8ccab86cc9289b04b2e9a351a",
+    "patch_bytes": 535,
+    "arm": "ink",
+    "turns": 8,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 62,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 493,
+    "max_prompt": 3148,
+    "first_cached": 0,
+    "reasoning_tokens": 253,
+    "max_thinking_per_turn": 123,
+    "approx_engine_decode_tps": 100.86,
+    "proposals": 1053.0,
+    "accepted": 836.0,
+    "verify_rounds": 405.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 1241,
+    "engine_uncached_input": 2135,
+    "completed_request_seconds": 14.772,
+    "prefill_engine_seconds": 2.368,
+    "decode_engine_seconds": 12.225
+  },
+  {
+    "id": "sympy__sympy-24539",
+    "seed": 42,
+    "wall_seconds": 22.418833985000674,
+    "completed": true,
+    "error": "",
+    "tools": 11,
+    "output_tokens": 1510,
+    "prompt_sha256": "3658e7ca1d260ecc8d528e04e53e6049548acbac3716c933f878e988c269a73a",
+    "patch_sha256": "ca1284753bce7427fbb817ac53acd1c7adb2b4e8ccab86cc9289b04b2e9a351a",
+    "patch_bytes": 535,
+    "arm": "ink-focused",
+    "turns": 12,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 62,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 539,
+    "max_prompt": 3759,
+    "first_cached": 0,
+    "reasoning_tokens": 178,
+    "max_thinking_per_turn": 107,
+    "approx_engine_decode_tps": 100.47,
+    "proposals": 1311.0,
+    "accepted": 1021.0,
+    "verify_rounds": 490.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 1510,
+    "engine_uncached_input": 2577,
+    "completed_request_seconds": 19.864,
+    "prefill_engine_seconds": 4.739,
+    "decode_engine_seconds": 14.91
+  },
+  {
+    "id": "sympy__sympy-24539",
+    "seed": 42,
+    "wall_seconds": 20.62374746400019,
+    "completed": true,
+    "error": "",
+    "tools": 5,
+    "output_tokens": 1189,
+    "prompt_sha256": "d099343c9c1a718a0cd9fb66aa233c40690758fd2d1c6d4cc88ce5b7a4859d7d",
+    "patch_sha256": "627e9d1e705a64ccbf840eab4c2a31f3612ec2a21899cfa6acf7248933c28ce9",
+    "patch_bytes": 691,
+    "arm": "qwen",
+    "turns": 6,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 62,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 634,
+    "max_prompt": 2703,
+    "first_cached": 0,
+    "reasoning_tokens": 250,
+    "max_thinking_per_turn": 106,
+    "approx_engine_decode_tps": 78.54,
+    "proposals": 1095.0,
+    "accepted": 828.0,
+    "verify_rounds": 365.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 1189,
+    "engine_uncached_input": 3769,
+    "completed_request_seconds": 18.402,
+    "prefill_engine_seconds": 3.289,
+    "decode_engine_seconds": 15.062
+  },
+  {
+    "id": "sympy__sympy-17139",
+    "seed": 42,
+    "wall_seconds": 26.346561500000462,
+    "completed": true,
+    "error": "",
+    "tools": 8,
+    "output_tokens": 1687,
+    "prompt_sha256": "cf30ef9806caa04bb6088e3060931c311b8d63f3f6e68d42c34c7e1d3836b608",
+    "patch_sha256": "3655b0cef3ffdad356226763a1af6473f569e7b7fd07dd8d9d0d6d16d09a01ee",
+    "patch_bytes": 397,
+    "arm": "ink",
+    "turns": 9,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 67,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 1001,
+    "max_prompt": 5308,
+    "first_cached": 0,
+    "reasoning_tokens": 518,
+    "max_thinking_per_turn": 247,
+    "approx_engine_decode_tps": 96.55,
+    "proposals": 1445.0,
+    "accepted": 1102.0,
+    "verify_rounds": 586.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 1687,
+    "engine_uncached_input": 4026,
+    "completed_request_seconds": 20.877,
+    "prefill_engine_seconds": 3.336,
+    "decode_engine_seconds": 17.379
+  },
+  {
+    "id": "sympy__sympy-17139",
+    "seed": 42,
+    "wall_seconds": 47.478951871999016,
+    "completed": true,
+    "error": "",
+    "tools": 13,
+    "output_tokens": 3439,
+    "prompt_sha256": "5303fdc13ab16032c16c136e2d5046d1fff2554b72f8885ce686a46a7c145e01",
+    "patch_sha256": "16eafb6bc9d88b24be1204e19fbe48e421a1e4c386e7292db9248b304bb5fd65",
+    "patch_bytes": 420,
+    "arm": "ink-focused",
+    "turns": 14,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 67,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 1047,
+    "max_prompt": 7608,
+    "first_cached": 0,
+    "reasoning_tokens": 1593,
+    "max_thinking_per_turn": 663,
+    "approx_engine_decode_tps": 93.1,
+    "proposals": 2938.0,
+    "accepted": 2186.0,
+    "verify_rounds": 1251.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 3439,
+    "engine_uncached_input": 4577,
+    "completed_request_seconds": 41.723,
+    "prefill_engine_seconds": 4.663,
+    "decode_engine_seconds": 36.787
+  },
+  {
+    "id": "sympy__sympy-17139",
+    "seed": 42,
+    "wall_seconds": 65.58756652599914,
+    "completed": true,
+    "error": "",
+    "tools": 10,
+    "output_tokens": 3181,
+    "prompt_sha256": "cf30ef9806caa04bb6088e3060931c311b8d63f3f6e68d42c34c7e1d3836b608",
+    "patch_sha256": "93bfc8fd156a43e992a382aa952503dc807364d579c95800747354144070fdee",
+    "patch_bytes": 402,
+    "arm": "qwen",
+    "turns": 11,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 2,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 67,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 1063,
+    "max_prompt": 5494,
+    "first_cached": 0,
+    "reasoning_tokens": 1733,
+    "max_thinking_per_turn": 677,
+    "approx_engine_decode_tps": 65.21,
+    "proposals": 3498.0,
+    "accepted": 2023.0,
+    "verify_rounds": 1166.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 3181,
+    "engine_uncached_input": 7302,
+    "completed_request_seconds": 55.337,
+    "prefill_engine_seconds": 6.603,
+    "decode_engine_seconds": 48.615
+  },
+  {
+    "id": "psf__requests-5414",
+    "seed": 42,
+    "wall_seconds": 375.5340334749999,
+    "completed": true,
+    "error": "",
+    "tools": 55,
+    "output_tokens": 25483,
+    "prompt_sha256": "0fe558a4ca5d3b109bd36a7cb533a4da8b3ea5519e1f82d4787cab227d20abca",
+    "patch_sha256": "64310a8b5be8210967071926db9ca77a22573831f71cf1a7bb750210a2b0c355",
+    "patch_bytes": 1508,
+    "arm": "ink",
+    "turns": 56,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 130,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 762,
+    "max_prompt": 49485,
+    "first_cached": 0,
+    "reasoning_tokens": 17031,
+    "max_thinking_per_turn": 1805,
+    "approx_engine_decode_tps": 92.55,
+    "proposals": 21156.0,
+    "accepted": 16478.0,
+    "verify_rounds": 8990.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 25483,
+    "engine_uncached_input": 24931,
+    "completed_request_seconds": 305.39,
+    "prefill_engine_seconds": 27.052,
+    "decode_engine_seconds": 274.726
+  },
+  {
+    "id": "psf__requests-5414",
+    "seed": 42,
+    "wall_seconds": 177.0399623859994,
+    "completed": true,
+    "error": "",
+    "tools": 44,
+    "output_tokens": 14163,
+    "prompt_sha256": "9d7f10d25b1a784c538503b23aa8c8b244e275104c4401107e0fe25c8962c1f4",
+    "patch_sha256": "395f29e921df9f997ab62dcd6cb81bcfb28de659e72289d6d6f6e1f0ed9f3060",
+    "patch_bytes": 1608,
+    "arm": "ink-focused",
+    "turns": 45,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 130,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 808,
+    "max_prompt": 26157,
+    "first_cached": 0,
+    "reasoning_tokens": 7512,
+    "max_thinking_per_turn": 1723,
+    "approx_engine_decode_tps": 95.47,
+    "proposals": 11744.0,
+    "accepted": 9238.0,
+    "verify_rounds": 4913.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 14163,
+    "engine_uncached_input": 12894,
+    "completed_request_seconds": 168.07,
+    "prefill_engine_seconds": 17.937,
+    "decode_engine_seconds": 147.882
+  },
+  {
+    "id": "psf__requests-5414",
+    "seed": 42,
+    "wall_seconds": 366.26802452599986,
+    "completed": true,
+    "error": "",
+    "tools": 31,
+    "output_tokens": 20788,
+    "prompt_sha256": "0fe558a4ca5d3b109bd36a7cb533a4da8b3ea5519e1f82d4787cab227d20abca",
+    "patch_sha256": "132489614e0ba67d92ab32768964db22aabcdea28c867b7c7995fe159e8b6617",
+    "patch_bytes": 902,
+    "arm": "qwen",
+    "turns": 25,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 130,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 878,
+    "max_prompt": 28646,
+    "first_cached": 0,
+    "reasoning_tokens": 17611,
+    "max_thinking_per_turn": 3964,
+    "approx_engine_decode_tps": 62.19,
+    "proposals": 22872.0,
+    "accepted": 13177.0,
+    "verify_rounds": 7624.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 20788,
+    "engine_uncached_input": 32974,
+    "completed_request_seconds": 362.803,
+    "prefill_engine_seconds": 28.323,
+    "decode_engine_seconds": 333.852
+  },
+  {
+    "id": "psf__requests-1142",
+    "seed": 42,
+    "wall_seconds": 33.72616829100116,
+    "completed": true,
+    "error": "",
+    "tools": 13,
+    "output_tokens": 2502,
+    "prompt_sha256": "3ca3482e96916f17aaeb904ff1d74d8b355f5080c63fb0b4348e020430e1908b",
+    "patch_sha256": "32f663ba3fda06a909961072f1d83c241ab3c7a7e183f1614795f276a31cddd9",
+    "patch_bytes": 779,
+    "arm": "ink",
+    "turns": 14,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 5,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 322,
+    "max_prompt": 8690,
+    "first_cached": 0,
+    "reasoning_tokens": 866,
+    "max_thinking_per_turn": 338,
+    "approx_engine_decode_tps": 94.92,
+    "proposals": 2117.0,
+    "accepted": 1625.0,
+    "verify_rounds": 872.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 2502,
+    "engine_uncached_input": 6509,
+    "completed_request_seconds": 32.79,
+    "prefill_engine_seconds": 6.241,
+    "decode_engine_seconds": 26.212
+  },
+  {
+    "id": "psf__requests-1142",
+    "seed": 42,
+    "wall_seconds": 104.95179590400039,
+    "completed": true,
+    "error": "",
+    "tools": 23,
+    "output_tokens": 8432,
+    "prompt_sha256": "6adcc440c627e29634023671de9ea1c3dfe3b989847a4f91084e6e80c88ab4bf",
+    "patch_sha256": "26d9291ec8dace06639f2ff586bd623f5a718547b7992f41bc075802a503062b",
+    "patch_bytes": 1237,
+    "arm": "ink-focused",
+    "turns": 24,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 5,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 368,
+    "max_prompt": 17790,
+    "first_cached": 0,
+    "reasoning_tokens": 4721,
+    "max_thinking_per_turn": 1175,
+    "approx_engine_decode_tps": 93.59,
+    "proposals": 7112.0,
+    "accepted": 5428.0,
+    "verify_rounds": 3008.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 8432,
+    "engine_uncached_input": 10207,
+    "completed_request_seconds": 101.812,
+    "prefill_engine_seconds": 10.917,
+    "decode_engine_seconds": 89.838
+  },
+  {
+    "id": "psf__requests-1142",
+    "seed": 42,
+    "wall_seconds": 51.166210900000806,
+    "completed": true,
+    "error": "",
+    "tools": 11,
+    "output_tokens": 2814,
+    "prompt_sha256": "3ca3482e96916f17aaeb904ff1d74d8b355f5080c63fb0b4348e020430e1908b",
+    "patch_sha256": "d3cc2665bab1df64346bbf9c64fb2222c563191f10432a97c6a0bf0d4ffe2efc",
+    "patch_bytes": 937,
+    "arm": "qwen",
+    "turns": 12,
+    "resolved": true,
+    "complete_and_resolved": true,
+    "official_test_counts": {
+      "FAIL_TO_PASS": {
+        "success": 1,
+        "failure": 0
+      },
+      "PASS_TO_PASS": {
+        "success": 5,
+        "failure": 0
+      },
+      "FAIL_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      },
+      "PASS_TO_FAIL": {
+        "success": 0,
+        "failure": 0
+      }
+    },
+    "first_prompt": 474,
+    "max_prompt": 7042,
+    "first_cached": 0,
+    "reasoning_tokens": 1378,
+    "max_thinking_per_turn": 526,
+    "approx_engine_decode_tps": 68.06,
+    "proposals": 2952.0,
+    "accepted": 1834.0,
+    "verify_rounds": 984.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 2814,
+    "engine_uncached_input": 9015,
+    "completed_request_seconds": 49.563,
+    "prefill_engine_seconds": 8.261,
+    "decode_engine_seconds": 41.169
+  },
+  {
+    "id": "django__django-14631",
+    "seed": 42,
+    "wall_seconds": 355.9620388860003,
+    "completed": false,
+    "error": "task deadline: context exhausted",
+    "tools": 14,
+    "output_tokens": 10889,
+    "prompt_sha256": "a95fc854e767d3437cd3fde0e90580e474ba5af56a40bc43c6bddab6e4062208",
+    "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "patch_bytes": 0,
+    "arm": "fixed-long",
+    "turns": 14,
+    "resolved": null,
+    "complete_and_resolved": null,
+    "official_test_counts": {},
+    "first_prompt": 239234,
+    "max_prompt": 257117,
+    "first_cached": 0,
+    "reasoning_tokens": 9933,
+    "max_thinking_per_turn": 4075,
+    "approx_engine_decode_tps": 72.85,
+    "proposals": 10350.0,
+    "accepted": 7439.0,
+    "verify_rounds": 3450.0,
+    "stop_reason": "context_limit",
+    "engine_generated": 10889,
+    "engine_uncached_input": 250501,
+    "completed_request_seconds": 351.524,
+    "prefill_engine_seconds": 198.714,
+    "decode_engine_seconds": 149.272,
+    "cold_prefill_tps": 1306.92,
+    "cold_decode_tps": 74.14
+  },
+  {
+    "id": "django__django-14631",
+    "seed": 42,
+    "wall_seconds": 307.67245683299916,
+    "completed": false,
+    "error": "task deadline: context exhausted",
+    "tools": 14,
+    "output_tokens": 7098,
+    "prompt_sha256": "a95fc854e767d3437cd3fde0e90580e474ba5af56a40bc43c6bddab6e4062208",
+    "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "patch_bytes": 0,
+    "arm": "ink-long",
+    "turns": 14,
+    "resolved": null,
+    "complete_and_resolved": null,
+    "official_test_counts": {},
+    "first_prompt": 239234,
+    "max_prompt": 260430,
+    "first_cached": 0,
+    "reasoning_tokens": 6286,
+    "max_thinking_per_turn": 3690,
+    "approx_engine_decode_tps": 71.14,
+    "proposals": 5888.0,
+    "accepted": 4734.0,
+    "verify_rounds": 2366.0,
+    "stop_reason": "context_limit",
+    "engine_generated": 7098,
+    "engine_uncached_input": 253506,
+    "completed_request_seconds": 303.491,
+    "prefill_engine_seconds": 200.588,
+    "decode_engine_seconds": 99.575,
+    "cold_prefill_tps": 1304.99,
+    "cold_decode_tps": 62.65
+  },
+  {
+    "id": "django__django-14631",
+    "seed": 42,
+    "wall_seconds": 237.99873572700017,
+    "completed": true,
+    "error": "",
+    "tools": 45,
+    "output_tokens": 15760,
+    "prompt_sha256": "b1a06160f91d0e502f17343136eda330a3e7c1d79a0fc0235f901dda39292d55",
+    "patch_sha256": "c4952851a7ab88e9915ab84ee1b2c8d6892433b4ba94ebfeb3ead427425bd6ef",
+    "patch_bytes": 5245,
+    "arm": "ink-short",
+    "turns": 46,
+    "resolved": null,
+    "complete_and_resolved": null,
+    "official_test_counts": {},
+    "first_prompt": 584,
+    "max_prompt": 41961,
+    "first_cached": 0,
+    "reasoning_tokens": 9903,
+    "max_thinking_per_turn": 2758,
+    "approx_engine_decode_tps": 94.33,
+    "proposals": 13091.0,
+    "accepted": 10384.0,
+    "verify_rounds": 5363.0,
+    "stop_reason": "final_answer",
+    "engine_generated": 15760,
+    "engine_uncached_input": 27870,
+    "completed_request_seconds": 198.357,
+    "prefill_engine_seconds": 27.978,
+    "decode_engine_seconds": 166.592
+  },
+  {
+    "id": "django__django-14631",
+    "seed": 42,
+    "wall_seconds": 480.0695961900001,
+    "completed": false,
+    "error": "timed out",
+    "tools": 27,
+    "output_tokens": 22442,
+    "prompt_sha256": "b1a06160f91d0e502f17343136eda330a3e7c1d79a0fc0235f901dda39292d55",
+    "patch_sha256": "e8c12f64bd7f160f116a129d9b59eea6c70aaaeafc6360292f45134dce4cb177",
+    "patch_bytes": 3221,
+    "arm": "qwen-short",
+    "turns": 19,
+    "resolved": null,
+    "complete_and_resolved": null,
+    "official_test_counts": {},
+    "first_prompt": 699,
+    "max_prompt": 34802,
+    "first_cached": 0,
+    "reasoning_tokens": 19771,
+    "max_thinking_per_turn": 6835,
+    "approx_engine_decode_tps": 62.18,
+    "proposals": 29229.0,
+    "accepted": 16968.0,
+    "verify_rounds": 9743.0,
+    "stop_reason": "wall_limit",
+    "engine_generated": 26698,
+    "engine_uncached_input": 37021,
+    "completed_request_seconds": 393.643,
+    "prefill_engine_seconds": 32.536,
+    "decode_engine_seconds": 360.612
+  }
+]

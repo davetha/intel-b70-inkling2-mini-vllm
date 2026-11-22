@@ -1,0 +1,28 @@
+{
+  "model": "Qwen3.8-27B",
+  "image": "sha256:131dd9e11809de2f3136547618f130ee238f0b90cd5718567bcdd0dad5360e19",
+  "service": "b70-qwen38-vllm.service",
+  "launch": {
+    "--served-model-name": "Qwen3.8-27B",
+    "--max-model-len": "262144",
+    "--speculative-config": "{\"method\":\"mtp\",\"num_speculative_tokens\":3}",
+    "--max-num-seqs": "16",
+    "--max-num-batched-tokens": "4096",
+    "--gpu-memory-utilization": "0.965",
+    "--kv-cache-dtype": "fp8",
+    "--revision": "113cf7ab958054860e43fb7f3063b1af19171095",
+    "--block-size": "1792",
+    "--prefix-match-unit": "128"
+  },
+  "inkling_recipe_commit": "6b71b909b2af758a21014657fcb967a58653eb28",
+  "inkling_baseline": "scripts/serve-coding-agent.sh dspark; INKLING2_DSPARK_ADAPTIVE=1",
+  "hardware": "single Intel Arc Pro B70, 32 GB; one active agent per trial",
+  "inkling_image": "sha256:131dd9e11809de2f3136547618f130ee238f0b90cd5718567bcdd0dad5360e19",
+  "inkling_kernel_settings": {
+    "INKLING2_DSPARK_LONG_SPLITS": "1",
+    "INKLING2_DSPARK_BLOCK": "1",
+    "INKLING2_DRAFT_SAMPLE_TOPK": "20",
+    "INKLING2_DRAFT_FUSED_TAPS": "1",
+    "INKLING2_DSPARK_ADAPTIVE": "1"
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "comparison": "Production Qwen 2026-11-22 vs rebuilt adaptive Inkling 2026-11-21, same agent, two seeds per issue, 240 s/task. Output token totals exclude the unfinished response on a timed-out request.",
+  "rows": [
+    {
+      "fixture": "mtp-next-routefix-v2",
+      "manifest_sha256": "f4d43ffab5fb3d812ceeb5f3c37f962d4fc3d1eeb98b2fc0fd88b08503b04282",
+      "seed": 911701,
+      "qwen": {
+        "correct": false,
+        "completed": false,
+        "hidden_pass": true,
+        "hidden_tests": 10,
+        "wall_seconds": 240.00454932499974,
+        "output_tokens": 15957,
+        "error": "timed out"
+      },
+      "inkling": {
+        "correct": true,
+        "completed": true,
+        "hidden_pass": true,
+        "hidden_tests": 10,
+        "wall_seconds": 167.72905946499668,
+        "output_tokens": 14532,
+        "error": ""
+      }
+    },
+    {
+      "fixture": "mtp-next-routefix-v2",
+      "manifest_sha256": "f4d43ffab5fb3d812ceeb5f3c37f962d4fc3d1eeb98b2fc0fd88b08503b04282",
+      "seed": 912101,
+      "qwen": {
+        "correct": true,
+        "completed": true,
+        "hidden_pass": true,
+        "hidden_tests": 10,
+        "wall_seconds": 179.66984398299974,
+        "output_tokens": 11143,
+        "error": ""
+      },
+      "inkling": {
+        "correct": true,
+        "completed": true,
+        "hidden_pass": true,
+        "hidden_tests": 10,
+        "wall_seconds": 132.19303018899518,
+        "output_tokens": 11410,
+        "error": ""
+      }
+    },
+    {
+      "fixture": "mtp-next-streamcodec-v2",
+      "manifest_sha256": "7f77c5e41df830d58f8dbcd5f28340ec6d7a31568ef77b2f167ff3d013d63151",
+      "seed": 911701,
+      "qwen": {
+        "correct": true,
+        "completed": true,
+        "hidden_pass": true,
+        "hidden_tests": 10,
+        "wall_seconds": 93.72247263000008,
+        "output_tokens": 6134,
+        "error": ""
+      },
+      "inkling": {
+        "correct": true,
+        "completed": true,
+        "hidden_pass": true,
+        "hidden_tests": 10,
+        "wall_seconds": 78.23496617500496,
+        "output_tokens": 6788,
+        "error": ""
+      }
+    },
+    {
+      "fixture": "mtp-next-streamcodec-v2",
+      "manifest_sha256": "7f77c5e41df830d58f8dbcd5f28340ec6d7a31568ef77b2f167ff3d013d63151",
+      "seed": 912101,
+      "qwen": {
+        "correct": false,
+        "completed": true,
+        "hidden_pass": false,
+        "hidden_tests": 10,
+        "wall_seconds": 67.11621928499972,
+        "output_tokens": 4458,
+        "error": ""
+      },
+      "inkling": {
+        "correct": true,
+        "completed": true,
+        "hidden_pass": true,
+        "hidden_tests": 10,
+        "wall_seconds": 74.67087665099825,
+        "output_tokens": 6401,
+        "error": ""
+      }
+    }
+  ]
+}
