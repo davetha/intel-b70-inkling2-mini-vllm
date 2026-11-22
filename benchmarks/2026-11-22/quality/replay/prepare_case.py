@@ -12,7 +12,9 @@ import pyarrow.parquet as pq
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "dataset", type=Path, help="Original SWE-bench Verified parquet"
+        "dataset",
+        type=Path,
+        help="Frozen Verified or Multilingual parquet for this case",
     )
     parser.add_argument("instance")
     parser.add_argument("output", type=Path)
@@ -20,17 +22,17 @@ def main():
     selection = json.loads(
         (Path(__file__).resolve().parents[1] / "selection.json").read_text()
     )
-    if (
-        hashlib.sha256(args.dataset.read_bytes()).hexdigest()
-        != selection["parquet_sha256"]
-    ):
-        parser.error("Dataset digest differs from the frozen panel")
     matches = [
         task for task in selection["tasks"] if task["instance_id"] == args.instance
     ]
     if not matches:
         parser.error("The requested case is outside the frozen panel")
     meta = matches[0]
+    digest = selection["parquet_sha256"]
+    if meta.get("dataset") == "SWE-bench/SWE-bench_Multilingual":
+        digest = selection["amendment"]["multilingual_parquet_sha256"]
+    if hashlib.sha256(args.dataset.read_bytes()).hexdigest() != digest:
+        parser.error("Dataset digest differs from the selected case's frozen dataset")
     data = pq.read_table(
         args.dataset, filters=[("instance_id", "=", args.instance)]
     ).to_pylist()

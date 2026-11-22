@@ -1,5 +1,5 @@
 {
-  "selection": "Lowest SHA256 of b70-quality-20261122: plus instance ID by repository, excluding all September pilot cases. Four Django, four SymPy, two Requests. The separate long case exercises Django forms and bound fields.",
+  "selection": "Four Django and two SymPy cases from the original SWE-bench Verified selection followed by four frontend TypeScript repairs from SWE-bench Multilingual. See amendment. The long repair remains a separate control.",
   "parquet_sha256": "030cfd7f2a704c4c0226e7f104c725a3b41230b1d3517f9c915ad7ea5be3fa25",
   "sampling": {
     "seed": 42,
@@ -66,40 +66,40 @@
       "issue_sha256": "867fbad616cdb7324c99258b4bd7ad7f6b4a2fb66f7945b669f9ae279ad38535"
     },
     {
-      "instance_id": "sympy__sympy-24539",
-      "repo": "sympy/sympy",
-      "base_commit": "193e3825645d93c73e31cdceb6d742cc6919624d",
-      "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24539:latest",
-      "difficulty": "<15 min fix",
+      "instance_id": "vuejs__core-11739",
+      "repo": "vuejs/core",
+      "base_commit": "cb843e0be31f9e563ccfc30eca0c06f2a224b505",
+      "image": "swebench/sweb.eval.x86_64.vuejs_1776_core-11739:latest",
       "kind": "panel",
-      "issue_sha256": "c45c55bcffb2b526d21ed6b0c8d19976455280d6ce9343f7f2d62d96c3d3e037"
+      "dataset": "SWE-bench/SWE-bench_Multilingual",
+      "issue_sha256": "ad169e608f43f78e93cf163c1dee01b8420a0de56fd4962f7829aa9d497f0686"
     },
     {
-      "instance_id": "sympy__sympy-17139",
-      "repo": "sympy/sympy",
-      "base_commit": "1d3327b8e90a186df6972991963a5ae87053259d",
-      "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-17139:latest",
-      "difficulty": "<15 min fix",
+      "instance_id": "facebook__docusaurus-10309",
+      "repo": "facebook/docusaurus",
+      "base_commit": "5e9e1d051b2217b95498ecbc10f7e33f64e7a4d3",
+      "image": "swebench/sweb.eval.x86_64.facebook_1776_docusaurus-10309:latest",
       "kind": "panel",
-      "issue_sha256": "17e532f00dac2a0e2aae1ca47a21c4be3cc3d4686da16dfc58ed0d69f6c02334"
+      "dataset": "SWE-bench/SWE-bench_Multilingual",
+      "issue_sha256": "19d8c5c48b3cb6d3b1b355522c24d152ed09e58b2d29345b77f82ba08ab3463e"
     },
     {
-      "instance_id": "psf__requests-5414",
-      "repo": "psf/requests",
-      "base_commit": "39d0fdd9096f7dceccbc8f82e1eda7dd64717a8e",
-      "image": "swebench/sweb.eval.x86_64.psf_1776_requests-5414:latest",
-      "difficulty": "<15 min fix",
+      "instance_id": "vuejs__core-11915",
+      "repo": "vuejs/core",
+      "base_commit": "d0b513eb463f580e29378e43d112ff6859aa366e",
+      "image": "swebench/sweb.eval.x86_64.vuejs_1776_core-11915:latest",
       "kind": "panel",
-      "issue_sha256": "08faa0ea47836476b5f4b3709c06a00569996ccc654011299f9c8587cd7007ba"
+      "dataset": "SWE-bench/SWE-bench_Multilingual",
+      "issue_sha256": "a378d0fb58a85045c2a2dcba79b56243d64aea479e7ba566cf4fed3577888cb7"
     },
     {
-      "instance_id": "psf__requests-1142",
-      "repo": "psf/requests",
-      "base_commit": "22623bd8c265b78b161542663ee980738441c307",
-      "image": "swebench/sweb.eval.x86_64.psf_1776_requests-1142:latest",
-      "difficulty": "<15 min fix",
+      "instance_id": "facebook__docusaurus-9183",
+      "repo": "facebook/docusaurus",
+      "base_commit": "b96004e77ebfb23e7349fa495d2177008186bd42",
+      "image": "swebench/sweb.eval.x86_64.facebook_1776_docusaurus-9183:latest",
       "kind": "panel",
-      "issue_sha256": "0192533ff2ef0c53a600b3ef02cb9dc20bf0998d56eeaee80ca1a76c46758eec"
+      "dataset": "SWE-bench/SWE-bench_Multilingual",
+      "issue_sha256": "513dc0ea120662123e5c0a6160c122d708a97b925d32c328f1127f8c152f2834"
     },
     {
       "instance_id": "django__django-14631",
@@ -123,8 +123,22 @@
     "cases": [
       "django__django-14238",
       "sympy__sympy-24443",
+      "vuejs__core-11739"
+    ],
+    "selection": "Keep the two original Python replication IDs. Replace the retired Requests replication with the lowest SHA256 of b70-quality-replication: plus ID among the four unrun TypeScript cases."
+  },
+  "amendment": {
+    "requested_after_case": 6,
+    "frozen_berlin": "2026-11-22 16:23:08 CET",
+    "original_selection_revision": "94f021ed5cbdfb283d8306b7cb87d139c4653182",
+    "replaced": [
+      "sympy__sympy-24539",
+      "sympy__sympy-17139",
+      "psf__requests-5414",
       "psf__requests-1142"
     ],
-    "selection": "One per repository from cases still unseen at 10:37 Berlin; lowest SHA256 of b70-quality-replication: plus instance ID. Repeat both Inkling instruction variants with independent fresh checkouts. Report separately from the main ten."
+    "replacement_criteria": "Real TypeScript frontend repairs covering server-rendered CSS, navigation, HTML templates and TSX code highlighting. Two Vue and two Docusaurus issues, selected before any model saw them.",
+    "multilingual_revision": "846e647b9f33c0b51b739d005d13d85493c9af09",
+    "multilingual_parquet_sha256": "92abca7cb527b41a9f66d03a26ce441ff7319e3a49f985998fd56be4bb9b08b2"
   }
 }

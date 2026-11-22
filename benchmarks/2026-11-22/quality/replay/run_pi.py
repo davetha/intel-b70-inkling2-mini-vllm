@@ -16,6 +16,7 @@ from urllib.request import urlopen
 from uuid import uuid4
 
 import pi_wire as wire
+import web_workspace
 
 
 def metrics(url):
@@ -188,7 +189,14 @@ def main():
         )
         server.metrics_fn = metrics
         proc = None
+        web = task.get("dataset") == web_workspace.DATASET
+        volume = box + "-work"
+        checkout = ["--tmpfs", f"/testbed:rw,exec,size=1g,uid={uid},gid={gid},mode=755"]
+        initialize = "tar xzf /input/source.tgz; git init -q; git add -f .; git -c user.name=bench -c user.email=bench@local commit -qm base; "
         try:
+            if web:
+                checkout = web_workspace.prepare(volume, task, uid, gid)
+                initialize = ""
             run(
                 "docker",
                 "run",
@@ -212,8 +220,7 @@ def main():
                 "4g",
                 "--cpus",
                 "3",
-                "--tmpfs",
-                f"/testbed:rw,exec,size=1g,uid={uid},gid={gid},mode=755",
+                *checkout,
                 "--tmpfs",
                 "/tmp:rw,exec,size=650m,mode=1777",
                 "-v",
@@ -258,7 +265,8 @@ def main():
                 execute(
                     "sh",
                     "-ec",
-                    "tar xzf /input/source.tgz; git init -q; git add -f .; git -c user.name=bench -c user.email=bench@local commit -qm base; mkdir -p /tmp/pi-profile; cp /input/models.json /input/settings.json /tmp/pi-profile; git rev-parse HEAD",
+                    initialize
+                    + "mkdir -p /tmp/pi-profile; cp /input/models.json /input/settings.json /tmp/pi-profile; git rev-parse HEAD",
                     capture_output=True,
                     timeout=100,
                 )
@@ -392,6 +400,8 @@ def main():
             sp.run(["docker", "rm", "-f", box], check=False, capture_output=True)
             server.shutdown()
             server.server_close()
+            if web:
+                web_workspace.remove(volume)
 
 
 if __name__ == "__main__":

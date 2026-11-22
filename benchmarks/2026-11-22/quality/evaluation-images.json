@@ -23,21 +23,21 @@
     "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21930@sha256:ac9b1c65d632e5a3d1af240db144ff27ed9a70b5507705d50480ede6899125d1",
     "config_digest": "sha256:9dbbee272ee911637e9a57f8c0c8b54257478b6e5a193f5030605fb7a080be4a"
   },
-  "sympy__sympy-24539": {
-    "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24539@sha256:b6303273066473c21cbf7b97d26f6bb214a5a24ebe6c65b8f26234e3315f7a4b",
-    "config_digest": "sha256:75c6c7fb5d9e9dc67d9230b49f5351278b434e1e9fd53d4f1ef01d8d83004075"
+  "vuejs__core-11739": {
+    "image": "swebench/sweb.eval.x86_64.vuejs_1776_core-11739@sha256:e6781528fd770c63294dd2f6def9bd98a4c457eed62755f99c496d346ed107f3",
+    "config_digest": "sha256:3e47966b27f24e7a5f0b2f84198b1d122907501d067e830bce398b57c018eed1"
   },
-  "sympy__sympy-17139": {
-    "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-17139@sha256:9a8111742e0548816d920a27ba259ebde7647f4e46e7522c61647990dd35713c",
-    "config_digest": "sha256:05bd322eebbc03124d5701f89047cf0c91c6905c87506c581cd40d8540bb9a48"
+  "facebook__docusaurus-10309": {
+    "image": "swebench/sweb.eval.x86_64.facebook_1776_docusaurus-10309@sha256:890c4247b5d2dba1e9a660c4a22b2e4f3cce30e75172f52b1b055f6feb56bf71",
+    "config_digest": "sha256:fed1dcb26a705a74336cc570f4f7deb25a7f46e3ad5d4e0098fd80e84b04d2e3"
   },
-  "psf__requests-5414": {
-    "image": "swebench/sweb.eval.x86_64.psf_1776_requests-5414@sha256:71c78211f16803c111ed1807ded20f8defd5f6917fb958ace4e076d5ea7d8b10",
-    "config_digest": "sha256:ff5caf954ad336865c3614fa0157f383a8e80c40ec802625347d119e3e33965e"
+  "vuejs__core-11915": {
+    "image": "swebench/sweb.eval.x86_64.vuejs_1776_core-11915@sha256:d2c1fae9c3704e168af3eca4e73437150c2c3544eebf1c56debc5f0e5e7a6fe1",
+    "config_digest": "sha256:57c5b399386fcef2df6e3f45bb7b7db65aeedde6708102d33142416f34022732"
   },
-  "psf__requests-1142": {
-    "image": "swebench/sweb.eval.x86_64.psf_1776_requests-1142@sha256:b2733e57feb4cfaeac24ab5ec496d4cb89a37db53bd0ca72eaededdb2ce19d1c",
-    "config_digest": "sha256:ebfed0b9a44723b3ab1e934f0b040f843abf01e1a3a8b248e150d314e949cfaa"
+  "facebook__docusaurus-9183": {
+    "image": "swebench/sweb.eval.x86_64.facebook_1776_docusaurus-9183@sha256:39613108947e31ae391740b6345098378cabc846973abb59d6e2bcb93aca38a3",
+    "config_digest": "sha256:86052b53b86dc3430773f30bc67e123102aa9cb5e6fa9910be1d9fdef0d7b7e2"
   },
   "django__django-14631": {
     "image": "swebench/sweb.eval.x86_64.django_1776_django-14631@sha256:bf4d29a9b9f54559d7a3ffadba03e462a97f8022cf536cb064b8804ed95cccc1",

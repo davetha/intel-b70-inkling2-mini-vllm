@@ -33,3 +33,16 @@ For the long repair, prepare `django__django-14631` and run `build_corpus.py cas
 For Requests 5414 the grader creates a temporary isolated Docker bridge. Four scored preservation tests expect a 100 ms TCP connect timeout to 10.255.255.1. The bridge reserves the address without assigning it to a peer and has no external route. The agent's checkout remains offline. Both the original base and the official reference were checked with this setup.
 
 To test Pi's history retention, add `--keep-recent 4096` on the long case. This passes `compaction.keepRecentTokens` through the documented Pi settings file. The compaction threshold, 262,144-token context, 8,192-token reasoning budget and original source text stay fixed. [Cut points obtained from the original Pi session](../pi-cutpoints.jsonl)
+
+### TypeScript web cases
+
+The amended ten-case panel uses SWE-bench Verified for the first six Python cases and SWE-bench Multilingual for the last four frontend cases. Supply the corresponding parquet to `prepare_case.py`. The selection records the upstream revision, input digests and all four replacement IDs. The Docker image digest is pinned per case. [Amended selection](../selection.json) · [Multilingual dataset](https://huggingface.co/datasets/SWE-bench/SWE-bench_Multilingual)
+
+For Vue and Docusaurus the runner creates a fresh disposable Docker volume from the official case image. It checks out the exact base commit, removes the upstream Git history and verifies the new single-commit checkout against the original Git tree. The volume retains the project's installed Node dependencies so Pi can run the repository's frontend tests offline. Only the independent grader receives the test patch and reference fix. It must reproduce a failing baseline and a passing reference before each case enters the model comparison.
+
+| Position | Repository and repair | Frontend behavior |
+| ---: | --- | --- |
+| 7 | Vue 11739 | Hydrate server-rendered components whose children bind styles and use CSS variables from Vue expressions. |
+| 8 | Docusaurus 10309 | Switch documentation versions when the current version is served at the root URL. |
+| 9 | Vue 11915 | Preserve literal double braces inside an HTML textarea marked with `v-pre`. |
+| 10 | Docusaurus 9183 | Highlight fenced code blocks regardless of capitalization in the language identifier. |
