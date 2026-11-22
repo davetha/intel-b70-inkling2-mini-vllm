@@ -16,6 +16,18 @@ The original recipe used three entropy-first prompts, each with one generated to
 - **Vocabulary projection.** The cookbook avoids rebuilding the output head in FP32. Our target already projects through its resident group-32 INT8 head, which the drafter can share. The cookbook's measured memory saving applies to its original baseline. [Local logits path](../../../inkling_xpu/vllm_model.py)
 - **Compilation and prefetch.** The donor builds specifically for BMG-G31 with a large register file and prefetches ahead in the GEMM reduction loop. Our grouped expert kernels already request 256 GRFs for the main DPAS launches and load the next packed weight row into registers. We can isolate the other two changes with the EXL3 weights fixed. One experiment compiles device binaries ahead of time for BMG-G31. The other prefetches packed weights farther ahead during prefill. [Donor build](https://github.com/SergiioB/intel-arc-pro-b70-inference-cookbook/blob/d3ef55afc899e85b7e8cb4c29e6830dfdd453ed1/patches/inkling2-mini-vllm-xpu/build-nvfp4-cutlass-xe2.sh) · [Donor kernel](https://github.com/SergiioB/intel-arc-pro-b70-inference-cookbook/blob/d3ef55afc899e85b7e8cb4c29e6830dfdd453ed1/patches/inkling2-mini-vllm-xpu/nvfp4_xe2_ext.cpp)
 
+## Six-row prefetch on real EXL3 experts
+
+The experimental kernel prefetched packed gate/up and down weights into L2 six reduction rows ahead, while retaining the existing one-row register pipeline. The change applied only to the large 32-row prefill tiles. We loaded all 128 real experts from layer zero and routed each BF16 input row to eight experts with a fixed skew. Four fresh processes ran in reference, candidate, candidate, reference order. After warmup, each observation timed five complete MoE calls including routing and recombination. Each process collected nine observations per length. All four processes produced identical output hashes at every length.
+
+| Input rows | Existing kernel | Six-row prefetch | Change in throughput |
+| ---: | ---: | ---: | ---: |
+| 512 | 2.623 ms | 2.723 ms | −3.65% |
+| 2,048 | 9.732 ms | 10.049 ms | −3.16% |
+| 4,096 | 18.876 ms | 19.463 ms | −3.02% |
+
+These are medians of the two process medians per implementation. We kept the existing kernel for serving. [All timings, output hashes and source hashes](expert-prefetch.json)
+
 ## Checkpoint and context
 
 | Weight files in bytes | Original | EXL3 |
