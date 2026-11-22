@@ -124,3 +124,16 @@ The two fixtures used the same sealed specifications, independent acceptance tes
 | Qwen3.8-27B | mtp-next-streamcodec-v2 | 912101 | False | False | 76.1 |
 
 Only the Pi runs above measure this agent. The archived direct-client comparison used the earlier ten Python cases. [Fixture baseline and independent reference controls](pi-fixture-calibration.json) · [Pi fixture grades](pi-control.json) · [Replay a Pi task](replay/README.md) · [Earlier direct-client controls](direct-controls.md)
+
+### Adaptive DSpark confidence kernel
+
+We fused the two top-20 softmax confidence tests and the selection of the proposed token prefix into a single SYCL workgroup. The candidate matched the existing implementation on all 1,440 decision pairs, including values near the 0.75 threshold. In captured XPU graphs the median time per decision fell from 17.61 to 1.53 microseconds.
+
+Four fresh servers ran in the order reference, fused kernel, fused kernel, reference. Each ran the same two streaming-codec seeds in Pi with automatic compaction and an 8,192-token thinking budget. We checked which library the serving worker actually mapped, matched generated-token counts to the streamed requests and applied each complete patch to a fresh fixture for ten hidden tests.
+
+| Implementation | Engine decode, tok/s | Range across repairs, tok/s | Accepted draft tokens | Total agent time | Passing repairs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Existing tensor operations | 93.48 | 91.17–95.55 | 73.96% | 378.4 s | 2/4 |
+| Fused SYCL kernel | 93.80 | 92.23–94.74 | 74.00% | 393.5 s | 1/4 |
+
+Engine throughput pools timed output tokens over decode seconds. The 0.34% difference falls within the observed variation across runs. Repeating the same sampling seed across fresh servers produced different patches. These results support keeping the existing confidence implementation in the serving recipe. [Per-run speeds, patch hashes, grades and microbenchmark samples](adaptive-kernel.json)
