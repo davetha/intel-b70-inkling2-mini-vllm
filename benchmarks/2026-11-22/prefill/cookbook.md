@@ -28,6 +28,20 @@ The experimental kernel prefetched packed gate/up and down weights into L2 six r
 
 These are medians of the two process medians per implementation. We kept the existing kernel for serving. [All timings, output hashes and source hashes](expert-prefetch.json)
 
+## Ahead-of-time compilation for BMG-G31
+
+We built the same EXL3 MoE source for the B70's BMG-G31 target with a large register file. The installed Intel compiler needed the vector backend for the individual ESIMD modules. The reference used its normal SPIR-V build. All 16 FP16/BF16 on-device parity cases produced matching hashes.
+
+Each server then processed two cold Pi requests per input length, with 4,096-token scheduler chunks and adaptive DSpark. The reference column pools four observations across the nearest reference starts before and after the candidate. The candidate column uses two observations from its own start.
+
+| Input tokens | Reference prefill tok/s | BMG-G31 AOT prefill tok/s | Difference |
+| ---: | ---: | ---: | ---: |
+| 4,844 | 1,865.61 | 1,863.19 | −0.13% |
+| 16,635 | 1,628.57 | 1,629.00 | +0.03% |
+| 31,376 | 1,772.81 | 1,773.68 | +0.05% |
+
+All three matched routing repairs returned and passed ten hidden checks. The two reference runs took 142.4 and 204.7 seconds. The AOT run took 222.2 seconds. Prefill stayed within 0.13% of the reference at all lengths, so the released recipe keeps the existing build. [Individual measurements, repair results and library hashes](bmg-aot.json)
+
 ## Checkpoint and context
 
 | Weight files in bytes | Original | EXL3 |

@@ -1,0 +1,315 @@
+{
+  "device": "Intel Arc Pro B70, 180 W",
+  "chunk": 4096,
+  "parity": {
+    "reference": "c5a614c9fa34606244d52d03c8bcf970b622a73c0fe8943699a3cfb910221757",
+    "candidate": "1182c72c157899500b34226cf3beee11c3478000b03211b2b7e63102f05632b1",
+    "source": "916389f4045841491ddc2ef93e28df160180dd46849d884bdec3a96f6ae2d2cf",
+    "matching_cases": 16
+  },
+  "profiles": [
+    {
+      "label": "reference2",
+      "chunk": 4096,
+      "cache_tokens": 263168,
+      "prefill": [
+        {
+          "tokens": 4844,
+          "prompt_sha256": "0010b6382d0f090dcca5dea6296ef624bbef6c60e02ced8c73beb5ae41ac30c8",
+          "probes": [
+            {
+              "repeat": 1,
+              "pi_requests": 3,
+              "prefill_s": 2.5795705409982475,
+              "ttft_s": 2.6541104900024948,
+              "vram": {
+                "samples": 2,
+                "minimum_free_bytes": 5959020544
+              }
+            },
+            {
+              "repeat": 2,
+              "pi_requests": 4,
+              "prefill_s": 2.6027831199971843,
+              "ttft_s": 2.671492526998918,
+              "vram": {
+                "samples": 2,
+                "minimum_free_bytes": 5785878528
+              }
+            }
+          ],
+          "median_prefill_tps": 1869.4583593818825,
+          "median_ttft_s": 2.6628015085007064
+        },
+        {
+          "tokens": 16635,
+          "prompt_sha256": "bd2c17492df7b30dc4232a25fe65b4a1686fde64ac57879811602f3ecdbf3cd7",
+          "probes": [
+            {
+              "repeat": 1,
+              "pi_requests": 1,
+              "prefill_s": 10.583977066999068,
+              "ttft_s": 10.669056432001526,
+              "vram": {
+                "samples": 9,
+                "minimum_free_bytes": 5832613888
+              }
+            },
+            {
+              "repeat": 2,
+              "pi_requests": 1,
+              "prefill_s": 9.862807031997363,
+              "ttft_s": 9.94197051100491,
+              "vram": {
+                "samples": 9,
+                "minimum_free_bytes": 5817143296
+              }
+            }
+          ],
+          "median_prefill_tps": 1629.177465839011,
+          "median_ttft_s": 10.305513471503218
+        },
+        {
+          "tokens": 31376,
+          "prompt_sha256": "2ba3c02b6e8291f64750ab5029dd29aff96e5d4e6bd7126855359a776fb01df4",
+          "probes": [
+            {
+              "repeat": 1,
+              "pi_requests": 1,
+              "prefill_s": 17.672605853003915,
+              "ttft_s": 17.748241464003513,
+              "vram": {
+                "samples": 17,
+                "minimum_free_bytes": 5785878528
+              }
+            },
+            {
+              "repeat": 2,
+              "pi_requests": 1,
+              "prefill_s": 17.73396850199788,
+              "ttft_s": 17.80519209400518,
+              "vram": {
+                "samples": 17,
+                "minimum_free_bytes": 5770604544
+              }
+            }
+          ],
+          "median_prefill_tps": 1772.3315408191556,
+          "median_ttft_s": 17.776716779004346
+        }
+      ],
+      "repair": {
+        "hidden_pass": true,
+        "returned": true,
+        "wall_s": 142.38116527300008,
+        "seed": 911701,
+        "patch_sha256": "6ebb5f9c20adfa7e6590e1bbbfe5d6614e840ac4b04fa7181a29c8dc7f2612b8",
+        "tokens": 12575.0,
+        "accepted": 7844.0,
+        "proposed": 10740.0
+      }
+    },
+    {
+      "label": "aot4096",
+      "chunk": 4096,
+      "cache_tokens": 263168,
+      "prefill": [
+        {
+          "tokens": 4844,
+          "prompt_sha256": "0010b6382d0f090dcca5dea6296ef624bbef6c60e02ced8c73beb5ae41ac30c8",
+          "probes": [
+            {
+              "repeat": 1,
+              "pi_requests": 3,
+              "prefill_s": 2.5922357750023366,
+              "ttft_s": 2.6677923899987945,
+              "vram": {
+                "samples": 1,
+                "minimum_free_bytes": 5958995968
+              }
+            },
+            {
+              "repeat": 2,
+              "pi_requests": 3,
+              "prefill_s": 2.6074885959969833,
+              "ttft_s": 2.6753027730010217,
+              "vram": {
+                "samples": 2,
+                "minimum_free_bytes": 5694296064
+              }
+            }
+          ],
+          "median_prefill_tps": 1863.1917141312954,
+          "median_ttft_s": 2.671547581499908
+        },
+        {
+          "tokens": 16635,
+          "prompt_sha256": "bd2c17492df7b30dc4232a25fe65b4a1686fde64ac57879811602f3ecdbf3cd7",
+          "probes": [
+            {
+              "repeat": 1,
+              "pi_requests": 1,
+              "prefill_s": 10.601320918001875,
+              "ttft_s": 10.687029317996348,
+              "vram": {
+                "samples": 10,
+                "minimum_free_bytes": 5834362880
+              }
+            },
+            {
+              "repeat": 2,
+              "pi_requests": 1,
+              "prefill_s": 9.84983397799806,
+              "ttft_s": 9.92653110899846,
+              "vram": {
+                "samples": 9,
+                "minimum_free_bytes": 5622988800
+              }
+            }
+          ],
+          "median_prefill_tps": 1629.0025185017278,
+          "median_ttft_s": 10.306780213497404
+        },
+        {
+          "tokens": 31376,
+          "prompt_sha256": "2ba3c02b6e8291f64750ab5029dd29aff96e5d4e6bd7126855359a776fb01df4",
+          "probes": [
+            {
+              "repeat": 1,
+              "pi_requests": 1,
+              "prefill_s": 17.62785137299943,
+              "ttft_s": 17.702307965002547,
+              "vram": {
+                "samples": 17,
+                "minimum_free_bytes": 5694296064
+              }
+            },
+            {
+              "repeat": 2,
+              "pi_requests": 1,
+              "prefill_s": 17.75220522399468,
+              "ttft_s": 17.82282304099499,
+              "vram": {
+                "samples": 17,
+                "minimum_free_bytes": 5696327680
+              }
+            }
+          ],
+          "median_prefill_tps": 1773.6765079711877,
+          "median_ttft_s": 17.76256550299877
+        }
+      ],
+      "repair": {
+        "hidden_pass": true,
+        "returned": true,
+        "wall_s": 222.1504437650001,
+        "seed": 911701,
+        "patch_sha256": "3a7829ba0c170ac584ad2dc39985f9cb42eeba64aefccddfce1cbf8f8b6a0df5",
+        "tokens": 19973.0,
+        "accepted": 12934.0,
+        "proposed": 16745.0
+      }
+    },
+    {
+      "label": "reference3",
+      "chunk": 4096,
+      "cache_tokens": 263168,
+      "prefill": [
+        {
+          "tokens": 4844,
+          "prompt_sha256": "0010b6382d0f090dcca5dea6296ef624bbef6c60e02ced8c73beb5ae41ac30c8",
+          "probes": [
+            {
+              "repeat": 1,
+              "pi_requests": 4,
+              "prefill_s": 2.5901869750014157,
+              "ttft_s": 2.664816778000386,
+              "vram": {
+                "samples": 1,
+                "minimum_free_bytes": 5958991872
+              }
+            },
+            {
+              "repeat": 2,
+              "pi_requests": 4,
+              "prefill_s": 2.6082346990006045,
+              "ttft_s": 2.6776369270010036,
+              "vram": {
+                "samples": 1,
+                "minimum_free_bytes": 5679611904
+              }
+            }
+          ],
+          "median_prefill_tps": 1863.6650468600176,
+          "median_ttft_s": 2.671226852500695
+        },
+        {
+          "tokens": 16635,
+          "prompt_sha256": "bd2c17492df7b30dc4232a25fe65b4a1686fde64ac57879811602f3ecdbf3cd7",
+          "probes": [
+            {
+              "repeat": 1,
+              "pi_requests": 1,
+              "prefill_s": 10.668235168996034,
+              "ttft_s": 10.755159286003618,
+              "vram": {
+                "samples": 9,
+                "minimum_free_bytes": 5726740480
+              }
+            },
+            {
+              "repeat": 2,
+              "pi_requests": 1,
+              "prefill_s": 9.869877493001695,
+              "ttft_s": 9.949468685001193,
+              "vram": {
+                "samples": 9,
+                "minimum_free_bytes": 5388103680
+              }
+            }
+          ],
+          "median_prefill_tps": 1622.3666065968855,
+          "median_ttft_s": 10.352313985502406
+        },
+        {
+          "tokens": 31376,
+          "prompt_sha256": "2ba3c02b6e8291f64750ab5029dd29aff96e5d4e6bd7126855359a776fb01df4",
+          "probes": [
+            {
+              "repeat": 1,
+              "pi_requests": 1,
+              "prefill_s": 17.67641418200219,
+              "ttft_s": 17.75656964600057,
+              "vram": {
+                "samples": 16,
+                "minimum_free_bytes": 5679611904
+              }
+            },
+            {
+              "repeat": 2,
+              "pi_requests": 1,
+              "prefill_s": 17.72057741900062,
+              "ttft_s": 17.795915588001662,
+              "vram": {
+                "samples": 16,
+                "minimum_free_bytes": 5679607808
+              }
+            }
+          ],
+          "median_prefill_tps": 1772.808785276853,
+          "median_ttft_s": 17.776242617001117
+        }
+      ],
+      "repair": {
+        "hidden_pass": true,
+        "returned": true,
+        "wall_s": 204.6744463089999,
+        "seed": 911701,
+        "patch_sha256": "5dc065d50642a3a8f56827a89a39888429d1fa44eb4049ce049334ab28576863",
+        "tokens": 18715.0,
+        "accepted": 12095.0,
+        "proposed": 15635.0
+      }
+    }
+  ]
+}
