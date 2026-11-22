@@ -94,9 +94,20 @@ if [[ ${INKLING2_VLLM_DSPARK:-0} == 1 ]]; then
         fi
         files+=(v1/worker/gpu/spec_decode/utils.py)
     fi
+    # N-gram copy drafts reuse the variable-width (-1 padded) scheduler path of adaptive DSpark.
+    ngram=${INKLING2_NGRAM_DRAFT:-0}
+    if [[ $ngram == 1 && $adaptive != 1 ]]; then
+        if [[ ${INKLING2_RING_PREFIX:-0} != 1 ]]; then
+            echo "N-gram drafts require synchronous prefix reuse" >&2
+            exit 2
+        fi
+        files+=(v1/worker/gpu/spec_decode/utils.py)
+    fi
     docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "${files[@]}" | tar -xf - -C "$work/v2"
-    if [[ $adaptive == 1 ]]; then
+    if [[ $adaptive == 1 || $ngram == 1 ]]; then
         patch --silent --batch --forward --fuzz=0 -d "$work/v2" -p1 <patches/vllm-inkling-adaptive-draft.patch
+    fi
+    if [[ $adaptive == 1 ]]; then
         spec_mounts+=(--env INKLING2_DSPARK_ADAPTIVE=1)
     fi
     patch --silent --batch --forward --fuzz=0 -d "$work/v2" -p1 <patches/vllm-v2-inkling-dspark.patch
@@ -104,6 +115,8 @@ if [[ ${INKLING2_VLLM_DSPARK:-0} == 1 ]]; then
         spec_mounts+=(--mount "type=bind,source=$work/v2/$file,target=$base/$file,readonly")
     done
     width=${INKLING2_DRAFT_MAX:-7}
+    # DSpark keeps proposing INKLING2_DRAFT_MAX tokens; copied continuations may go deeper.
+    [[ $ngram == 1 ]] && width=${INKLING2_NGRAM_DEPTH:-7}
     case "$width" in [1-7]) ;; *) exit 2;; esac
     draft_sampling=${INKLING2_DSPARK_SAMPLING:-greedy}
     case "$draft_sampling" in greedy|probabilistic) ;; *) exit 2;; esac

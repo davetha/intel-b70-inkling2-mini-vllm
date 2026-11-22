@@ -3,6 +3,7 @@
 import json
 import os
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from safetensors import safe_open
@@ -372,6 +373,29 @@ class DraftSampling:
         )
 
 
+def ngram_continuation(tokens, low, high, depth):
+    """Continuation after the longest (then most recent) earlier match of the trailing n-gram."""
+    n = len(tokens)
+    ends = np.flatnonzero(tokens[: n - 1] == tokens[n - 1])
+    if not len(ends):
+        return None
+    length = np.ones(len(ends), dtype=np.int64)
+    alive = np.ones(len(ends), dtype=bool)
+    for j in range(1, min(high, n)):
+        back = ends - j
+        alive &= back >= 0
+        alive[alive] = tokens[back[alive]] == tokens[n - 1 - j]
+        if not alive.any():
+            break
+        length += alive
+    good = np.flatnonzero(length >= low)
+    if not len(good):
+        return None
+    best = good[np.lexsort((ends[good], length[good]))[-1]]
+    first = int(ends[best]) + 1
+    return tokens[first : first + depth].tolist()
+
+
 class InklingDSparkSpeculator(BaseSpeculator):
     supports_mm_inputs = False
     draft_logits = None
@@ -387,6 +411,20 @@ class InklingDSparkSpeculator(BaseSpeculator):
                 self.width, config.model_config.get_vocab_size(), device, config.model_config.use_fp64_gumbel
             )
             self.draft_logits = self.sampling.logits
+        # INKLING2_NGRAM_DRAFT copies the continuation of the longest earlier
+        # match of the trailing n-gram (num_speculative_tokens deep) and falls
+        # back to INKLING2_DRAFT_MAX DSpark tokens, padded with -1.
+        self.ngram_max = 0
+        if os.environ.get("INKLING2_NGRAM_DRAFT", "0") == "1":
+            self.ngram_min = int(os.environ.get("INKLING2_NGRAM_MIN", "3"))
+            self.ngram_max = int(os.environ.get("INKLING2_NGRAM_MAX", "8"))
+            self.dspark_steps = int(os.environ.get("INKLING2_DRAFT_MAX", "3"))
+            if not 1 <= self.ngram_min <= self.ngram_max or not 1 <= self.dspark_steps <= self.width:
+                raise ValueError("Invalid n-gram draft settings")
+            self.padding = torch.full(
+                (1, self.width - self.dspark_steps), -1, device=device, dtype=torch.long
+            )
+            self.ngram_rounds = 0
 
     def init_cudagraph_manager(self, cudagraph_mode):
         pass
@@ -423,6 +461,42 @@ class InklingDSparkSpeculator(BaseSpeculator):
             start = input_batch.seq_lens[:1].int() - num_rejected[:1].int()
         else:
             start = upper - int(num_rejected[0].item())
+        if self.ngram_max:
+            copied = self.ngram_propose(input_batch, num_sampled)
+            if copied is not None:
+                return copied
         anchor = last_sampled[input_batch.idx_mapping[:1]].reshape(1).long()
         draft = self.target.draft
-        return draft.propose(self.target, anchor, start, self.width, upper)
+        if not self.ngram_max:
+            return draft.propose(self.target, anchor, start, self.width, upper)
+        steps = draft.propose(self.target, anchor, start, self.dspark_steps, upper)
+        return torch.cat([steps, self.padding], dim=1)
+
+    def ngram_propose(self, input_batch, num_sampled):
+        # The target forward stores draft KV and f_ring for every verified row,
+        # so a round without the DSpark block leaves the next block's inputs intact.
+        req = int(input_batch.idx_mapping_np[0])
+        length, sampled = torch.stack(
+            [self.req_states.total_len.gpu[req].long(), num_sampled[0].long()]
+        ).tolist()
+        if sampled <= 0 or length <= self.ngram_min:
+            return None
+        history = getattr(self.req_states.all_token_ids, "_uva_buf", None)
+        if history is not None:
+            tokens = history.np[req, :length]
+        else:
+            tokens = self.req_states.all_token_ids.gpu[req, :length].cpu().numpy()
+        copied = ngram_continuation(tokens, self.ngram_min, self.ngram_max, self.width)
+        if copied is None:
+            return None
+        self.ngram_rounds += 1
+        count = len(copied)
+        row = torch.tensor(
+            [list(copied) + [-1] * (self.width - count)], dtype=torch.long
+        ).to(self.empty.device)
+        if self.sampling is not None:
+            # One-hot proposal distribution keeps rejection sampling exact.
+            logits = self.sampling.logits[0, :count]
+            logits.fill_(-float("inf"))
+            logits.scatter_(1, row[0, :count, None], 0.0)
+        return row

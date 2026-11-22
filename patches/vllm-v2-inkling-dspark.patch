@@ -12,12 +12,13 @@
              ExtractHiddenStatesSpeculator,
 --- a/v1/worker/gpu/model_runner.py
 +++ b/v1/worker/gpu/model_runner.py
-@@ -416,6 +416,8 @@
+@@ -416,6 +416,9 @@
                  )
                  if self.pp_handler is not None:
                      self.pp_handler.configure_aux_hidden_state_relay(self.model)
 +            if self.speculator is not None and self.speculative_config.model == "inkling_xpu.dspark.InklingDSparkSpeculator":
 +                self.speculator.target = self.model
++                self.speculator.req_states = self.req_states
              if isinstance(self.speculator, DraftModelSpeculator):
                  with use_workspace_lane(self._draft_workspace_lane):
                      self.speculator.load_model(self.model)
