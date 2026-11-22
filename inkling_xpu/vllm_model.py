@@ -25,7 +25,9 @@ from .split_attention import local_xmx, paged_splits, paged_xmx
 class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
     # The dense tensors go through vLLM's weight iterator. EXL3 expert shards
     # are loaded one expert at a time into their final packed device arenas.
-    allow_patterns_overrides = ["dense-*.safetensors"]
+    # EXL3 checkouts keep dense weights in dense-*.safetensors; native NVFP4 checkpoints ship model-*.safetensors.
+    allow_patterns_overrides = (["model-*.safetensors"] if os.environ.get("INKLING2_EXPERTS", "exl3") == "native"
+                                else ["dense-*.safetensors"])
 
     def __init__(self, *, vllm_config, prefix=""):
         if vllm_config.scheduler_config.max_num_seqs != 1 or not vllm_config.model_config.enforce_eager:
@@ -90,8 +92,13 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         moe_ops().moe_set_pair_max_m(int(os.environ.get("INKLING2_EXL3_PAIR_MAX", "8")))
         if os.environ.get("INKLING2_EXL3_SMALL_DPAS") == "1":
             moe_ops().moe_set_tiny_dpas(4, 9, 18)
-        experts = {layer: InklingEXL3Experts(self.checkpoint, layer, device, self.tc["n_routed_experts"])
-                   for layer in range(self.n_layers)}
+        # INKLING2_EXPERTS=native keeps the checkpoint's NVFP4/MXFP8 experts (the model's training precision);
+        # the base loader then builds Trellis' SYCL experts from them. The default re-packs EXL3 experts.
+        if os.environ.get("INKLING2_EXPERTS", "exl3") == "native":
+            experts = None
+        else:
+            experts = {layer: InklingEXL3Experts(self.checkpoint, layer, device, self.tc["n_routed_experts"])
+                       for layer in range(self.n_layers)}
         super().load_weights(weights, experts=experts)
         if self.want_dspark:
             from .dspark import InklingDraft

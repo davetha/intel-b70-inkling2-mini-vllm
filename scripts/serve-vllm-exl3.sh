@@ -191,6 +191,7 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env "INKLING2_EXL3_SMALL_DPAS=${INKLING2_EXL3_SMALL_DPAS:-0}" \
     --env "INKLING2_EXL3_PAIR_MAX=${INKLING2_EXL3_PAIR_MAX:-8}" \
     --env "INKLING2_RING_PREFIX=${INKLING2_RING_PREFIX:-0}" \
+    --env "INKLING2_EXPERTS=${INKLING2_EXPERTS:-exl3}" \
     --env "INKLING2_CONTROL_LIB=${INKLING2_CONTROL_LIB:-}" \
     --env "INKLING2_DECODE_GRAPH=${INKLING2_DECODE_GRAPH:-0}" \
     --env "INKLING2_LIB=${INKLING2_LIB:-/lab/.work/build/inkling2-vllm.so}" \
