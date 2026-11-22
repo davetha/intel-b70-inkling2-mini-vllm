@@ -18,6 +18,9 @@ def main():
     a = p.parse_args()
     r = json.loads(a.private.read_text())
     spec = make_test_spec(r)
+    # Docusaurus images can pin Yarn by editing the tracked package.json during
+    # image construction. Pi receives the exact source tree at base_commit.
+    restore_base = r["repo"] == "facebook/docusaurus"
     a.out.mkdir(exist_ok=True, parents=True)
     patch = (
         ""
@@ -86,7 +89,13 @@ def main():
                     "/bin/bash",
                     r["image"],
                     "-c",
-                    "set -e; cd /testbed; git config --global --add safe.directory /testbed; if test -s /input.patch; then git apply --whitespace=nowarn /input.patch; fi; echo B70_PATCH_APPLIED; exec /bin/bash /evaluation.sh",
+                    'set -e; cd /testbed; git config --global --add safe.directory /testbed; '
+                    'if test -n "$1"; then git checkout --force --detach "$1"; '
+                    'git diff --quiet "$1" --; fi; '
+                    'if test -s /input.patch; then git apply --whitespace=nowarn /input.patch; fi; '
+                    'echo B70_PATCH_APPLIED; exec /bin/bash /evaluation.sh',
+                    "grade",
+                    r["base_commit"] if restore_base else "",
                 ],
                 check=False,
                 stdout=stream,
@@ -103,6 +112,8 @@ def main():
         "model_patch": patch,
     }
     report = get_eval_report(spec, predicted, str(log), True)[r["instance_id"]]
+    if restore_base:
+        report["clean_base_commit"] = r["base_commit"]
     report["docker_exit"] = proc.returncode
     report["applied"] = "B70_PATCH_APPLIED" in log.read_text(errors="replace")
     report["fail_to_pass_total"] = len(spec.FAIL_TO_PASS)
