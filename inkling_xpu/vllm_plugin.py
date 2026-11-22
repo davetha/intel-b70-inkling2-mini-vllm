@@ -41,6 +41,9 @@ def register():
     from vllm.v1.worker.gpu.spec_decode.speculator_config import register_speculative_method
 
     ModelRegistry.register_model("Inkling2B70ForCausalLM", "inkling_xpu.vllm_model:Inkling2B70ForCausalLM")
+    ModelRegistry.register_model(
+        "Inkling2B70ForConditionalGeneration", "inkling_xpu.vision:Inkling2B70ForConditionalGeneration"
+    )
     register_speculative_method("inkling_dspark", "inkling_xpu.dspark_config.InklingDSparkSpeculatorConfig")
     if os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1":
         raise NotImplementedError("Adaptive DSpark is not ported to vLLM 0.34")

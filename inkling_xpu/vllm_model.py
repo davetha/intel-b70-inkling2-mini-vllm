@@ -26,6 +26,7 @@ from .split_attention import local_xmx, paged_splits, paged_xmx
 class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
     # The dense tensors go through vLLM's weight iterator. EXL3 expert shards
     # are loaded one expert at a time into their final packed device arenas.
+    enable_vision = False
     # EXL3 checkouts keep dense weights in dense-*.safetensors; native NVFP4 checkpoints ship model-*.safetensors.
     allow_patterns_overrides = (["model-*.safetensors"] if os.environ.get("INKLING2_EXPERTS", "exl3") == "native"
                                 else ["dense-*.safetensors"])
@@ -40,7 +41,7 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             raise ValueError("Inkling XPU requires a BF16 or E4M3 KV cache")
         checkpoint = Path(vllm_config.model_config.model)
         raw = json.loads((checkpoint / "config.json").read_text())
-        super().__init__(SimpleNamespace(inkling_text=raw["text_config"], inkling_vision=None), external_slots=1)
+        super().__init__(SimpleNamespace(inkling_text=raw["text_config"], inkling_vision=raw["vision_config"] if self.enable_vision else None), external_slots=1)
         self.prefill_controller = os.environ.get("INKLING2_PREFILL_CONTROLLER", "0") == "1"
         self.prefill_bank = os.environ.get("INKLING2_PREFILL_BANK", "0") == "1"
         self.prefill_dense_bf16 = os.environ.get("INKLING2_PREFILL_DENSE_BF16", "0") == "1"

@@ -14,6 +14,12 @@ For faster prompt processing with adaptive DSpark, append `--max-num-batched-tok
 
 For text sessions with frequent medium-length cold prompts, set `INKLING2_VLLM_BATCH=6144` when starting the coding launcher. At 16,635 input tokens this reduced median first-output latency from 10.30 to 9.23 seconds compared with 4,096. At 31,376 tokens the difference was 0.15 seconds, with 1.31 GiB less free VRAM. The 4,096 setting has the 240K repair qualification. [Scheduler measurements and Pi results](benchmarks/2026-11-22/prefill/chunk-sweep.md)
 
+For browser screenshots, use the optional image-enabled coding profile below. A real Pi browser session on the B70 correctly read a randomized image and used DSpark to verify the response. [Image handling, screenshot and draft counters](benchmarks/2026-11-22/vision/README.md)
+
+```bash
+INKLING2_VISION=1 INKLING2_DSPARK_ADAPTIVE=1 bash scripts/serve-coding-agent.sh dspark --max-num-batched-tokens 4096
+```
+
 ## Validated profile
 
 | Setting | Reference configuration |

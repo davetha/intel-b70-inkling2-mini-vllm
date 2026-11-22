@@ -1,0 +1,61 @@
+{
+  "model": "inkling2-mini-exl3-b70",
+  "generation_settings": {
+    "model": "inkling2-mini-exl3-b70",
+    "reasoning_effort": "medium",
+    "thinking_token_budget": 8192
+  },
+  "seconds": 24.566,
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 16384,
+    "keepRecentTokens": 4096
+  },
+  "tool_names": [
+    "bash",
+    "browser_open"
+  ],
+  "requests": 3,
+  "screenshot": {
+    "sha256": "a5a11a802b55a640953f90e3826ef84d872cde3fc6aef934e3ce5a82ad8d1ee7",
+    "width": 820,
+    "height": 480,
+    "byte_length": 6795
+  },
+  "request_image": {
+    "mime": "image/png",
+    "bytes": 6795,
+    "sha256": "a5a11a802b55a640953f90e3826ef84d872cde3fc6aef934e3ce5a82ad8d1ee7"
+  },
+  "answer": {
+    "left": "orange",
+    "right": "red",
+    "number": "288"
+  },
+  "image_request_usage": {
+    "prompt_tokens": 4450,
+    "total_tokens": 4508,
+    "completion_tokens": 58,
+    "prompt_tokens_details": {
+      "cached_tokens": 4064,
+      "created_cache_tokens": 384,
+      "multimodal_tokens": {
+        "image": 253
+      }
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 27
+    }
+  },
+  "image_request_engine_delta": {
+    "spec_decode_num_accepted_tokens_total": 41.0,
+    "spec_decode_num_draft_tokens_total": 47.0,
+    "generation_tokens_total": 58.0,
+    "mm_cache_queries_total": 1.0,
+    "mm_cache_hits_total": 0.0,
+    "request_prefill_time_seconds_sum": 0.38067360700370045,
+    "request_decode_time_seconds_sum": 0.5445716140020522
+  },
+  "image_request_first_output_seconds": 0.46959631299978355,
+  "passed": true
+}
