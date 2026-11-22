@@ -83,37 +83,16 @@ fi
 spec_mounts=()
 spec_args=()
 if [[ ${INKLING2_VLLM_DSPARK:-0} == 1 ]]; then
-    base=/opt/venv/lib/python3.12/site-packages/vllm
-    mkdir -p "$work/v2"
-    files=(config/vllm.py v1/worker/gpu/spec_decode/__init__.py v1/worker/gpu/model_runner.py)
-    adaptive=${INKLING2_DSPARK_ADAPTIVE:-0}
-    if [[ $adaptive == 1 ]]; then
-        if [[ ${INKLING2_RING_PREFIX:-0} != 1 || ${INKLING2_DSPARK_SAMPLING:-greedy} != probabilistic ]]; then
-            echo "Adaptive DSpark requires synchronous prefix reuse and probabilistic proposals" >&2
-            exit 2
-        fi
-        files+=(v1/worker/gpu/spec_decode/utils.py)
+    # vLLM 0.34: DSpark is the registered speculative method "inkling_dspark"; no vLLM file overrides.
+    if [[ ${INKLING2_DSPARK_ADAPTIVE:-0} == 1 ]]; then
+        echo "Adaptive DSpark is not ported to vLLM 0.34" >&2
+        exit 2
     fi
-    # N-gram copy drafts reuse the variable-width (-1 padded) scheduler path of adaptive DSpark.
     ngram=${INKLING2_NGRAM_DRAFT:-0}
-    if [[ $ngram == 1 && $adaptive != 1 ]]; then
-        if [[ ${INKLING2_RING_PREFIX:-0} != 1 ]]; then
-            echo "N-gram drafts require synchronous prefix reuse" >&2
-            exit 2
-        fi
-        files+=(v1/worker/gpu/spec_decode/utils.py)
+    if [[ $ngram == 1 && ${INKLING2_RING_PREFIX:-0} != 1 ]]; then
+        echo "N-gram drafts require synchronous prefix reuse" >&2
+        exit 2
     fi
-    docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "${files[@]}" | tar -xf - -C "$work/v2"
-    if [[ $adaptive == 1 || $ngram == 1 ]]; then
-        patch --silent --batch --forward --fuzz=0 -d "$work/v2" -p1 <patches/vllm-inkling-adaptive-draft.patch
-    fi
-    if [[ $adaptive == 1 ]]; then
-        spec_mounts+=(--env INKLING2_DSPARK_ADAPTIVE=1)
-    fi
-    patch --silent --batch --forward --fuzz=0 -d "$work/v2" -p1 <patches/vllm-v2-inkling-dspark.patch
-    for file in "${files[@]}"; do
-        spec_mounts+=(--mount "type=bind,source=$work/v2/$file,target=$base/$file,readonly")
-    done
     width=${INKLING2_DRAFT_MAX:-7}
     # DSpark keeps proposing INKLING2_DRAFT_MAX tokens; copied continuations may go deeper.
     [[ $ngram == 1 ]] && width=${INKLING2_NGRAM_DEPTH:-7}
@@ -122,7 +101,7 @@ if [[ ${INKLING2_VLLM_DSPARK:-0} == 1 ]]; then
     case "$draft_sampling" in greedy|probabilistic) ;; *) exit 2;; esac
     verification=${INKLING2_DSPARK_VERIFICATION:-standard}
     case "$verification" in standard|block) ;; *) exit 2;; esac
-    spec_args=(--speculative-config "{\"method\":\"custom_class\",\"model\":\"inkling_xpu.dspark.InklingDSparkSpeculator\",\"num_speculative_tokens\":$width,\"draft_sample_method\":\"$draft_sampling\",\"rejection_sample_method\":\"$verification\"}")
+    spec_args=(--speculative-config "{\"method\":\"inkling_dspark\",\"num_speculative_tokens\":$width,\"draft_sample_method\":\"$draft_sampling\",\"rejection_sample_method\":\"$verification\"}")
 fi
 
 if [[ ${INKLING2_AGENT_TOOLS:-0} == 1 ]]; then
@@ -130,7 +109,9 @@ if [[ ${INKLING2_AGENT_TOOLS:-0} == 1 ]]; then
     file=renderers/inkling.py
     mkdir -p "$work/text-renderer"
     docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "$file" | tar -xf - -C "$work/text-renderer"
-    patch --silent --batch --forward --fuzz=0 -d "$work/text-renderer" -p1 < patches/vllm-inkling-text-renderer.patch
+    # 0.34 lacks the upstream OPTIONAL_SPECIAL_TOKENS fix; skip the patch once it is present.
+    grep -q OPTIONAL_SPECIAL_TOKENS "$work/text-renderer/$file" ||
+        patch --silent --batch --forward --fuzz=0 -d "$work/text-renderer" -p1 < patches/vllm-inkling-text-renderer.patch
     spec_mounts+=(--mount "type=bind,source=$work/text-renderer/$file,target=$base/$file,readonly")
     spec_args+=(--tokenizer-mode inkling --enable-auto-tool-choice --tool-call-parser inkling --reasoning-parser inkling
                 --enable-prompt-tokens-details)
@@ -150,12 +131,7 @@ fi
 
 prefix_args=(--no-enable-prefix-caching)
 if [[ ${INKLING2_RING_PREFIX:-0} == 1 ]]; then
-    base=/opt/venv/lib/python3.12/site-packages/vllm
-    file=v1/core/kv_cache_manager.py
-    mkdir -p "$work/ring-prefix"
-    docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "$file" | tar -xf - -C "$work/ring-prefix"
-    patch --silent --batch --forward --fuzz=0 -d "$work/ring-prefix" -p1 < patches/vllm-single-slot-ring-prefix.patch
-    spec_mounts+=(--mount "type=bind,source=$work/ring-prefix/$file,target=$base/$file,readonly")
+    # The plugin wraps KVCacheManager (inkling_xpu.ring_prefix.install) when INKLING2_RING_PREFIX=1.
     prefix_args=(--enable-prefix-caching --no-async-scheduling)
 fi
 

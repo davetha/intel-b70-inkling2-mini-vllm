@@ -11,7 +11,17 @@ from safetensors.torch import load_file
 
 from .split_attention import merge_splits
 
+from vllm.v1.worker.gpu.spec_decode.draft_logits import DraftLogitsCache
 from vllm.v1.worker.gpu.spec_decode.speculator import BaseSpeculator
+
+# vLLM 0.34 has no runner hook to hand a custom speculator the target model,
+# so the Inkling model binds itself here once its draft is built.
+_TARGET = None
+
+
+def bind_target(model):
+    global _TARGET
+    _TARGET = model
 
 
 def norm(x, weight):
@@ -333,8 +343,11 @@ class DraftSampling:
     """Use vLLM's position-keyed draft RNG and its matching rejection sampler."""
 
     def __init__(self, width, vocab, device, fp64):
-        self.logits = torch.full((1, width, vocab), -float("inf"), device=device, dtype=torch.float32)
+        self.cache = DraftLogitsCache(1, width, vocab, dtype=torch.float32, fill=-float("inf"), device=device)
+        self.logits = self.cache.values
         self.adaptive = os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1"
+        if self.adaptive:
+            raise NotImplementedError("Adaptive DSpark is not ported to vLLM 0.34")
         self.confidence = [None] * width if self.adaptive else []
         self.temperature = torch.zeros(1, device=device)
         self.seed = torch.zeros(1, dtype=torch.int64, device=device)
@@ -400,7 +413,8 @@ class InklingDSparkSpeculator(BaseSpeculator):
     supports_mm_inputs = False
     draft_logits = None
 
-    def __init__(self, config, device):
+    def __init__(self, config, device, req_states=None):
+        self.req_states = req_states
         self.width = config.speculative_config.num_speculative_tokens
         if not 1 <= self.width < 8 or config.scheduler_config.max_num_seqs != 1:
             raise ValueError("Inkling DSpark supports one sequence and between one and seven proposals")
@@ -410,7 +424,7 @@ class InklingDSparkSpeculator(BaseSpeculator):
             self.sampling = DraftSampling(
                 self.width, config.model_config.get_vocab_size(), device, config.model_config.use_fp64_gumbel
             )
-            self.draft_logits = self.sampling.logits
+            self.draft_logits = self.sampling.cache
         # INKLING2_NGRAM_DRAFT copies the continuation of the longest earlier
         # match of the trailing n-gram (num_speculative_tokens deep) and falls
         # back to INKLING2_DRAFT_MAX DSpark tokens, padded with -1.
@@ -425,6 +439,12 @@ class InklingDSparkSpeculator(BaseSpeculator):
                 (1, self.width - self.dspark_steps), -1, device=device, dtype=torch.long
             )
             self.ngram_rounds = 0
+
+    @property
+    def target(self):
+        if _TARGET is None:
+            raise RuntimeError("The Inkling model has not bound its DSpark target")
+        return _TARGET
 
     def init_cudagraph_manager(self, cudagraph_mode):
         pass

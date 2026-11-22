@@ -54,13 +54,15 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self.warmed_shapes = set()
         self.compare_graph = os.environ.get("INKLING2_COMPARE_GRAPH", "0") == "1"
         spec = vllm_config.speculative_config
-        self.want_dspark = spec is not None and spec.model == "inkling_xpu.dspark.InklingDSparkSpeculator"
+        self.want_dspark = spec is not None and spec.custom_method == "inkling_dspark"
         self.arbitrary_rows = self.local_xmx is not None and self.use_paged_xmx and cache.cache_dtype.startswith("fp8")
         self.page_tokens = cache.block_size or 16
         self.arbitrary_rows = self.arbitrary_rows and self.page_tokens % 16 == 0
         if self.want_dspark and spec.num_speculative_tokens not in (1, 3, 7) and not self.arbitrary_rows:
             raise ValueError("This DSpark width requires FP8 KV and both target XMX attention kernels")
         self.capture_rows = {1, spec.num_speculative_tokens + 1} if self.want_dspark else {1}
+        if os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1":
+            raise NotImplementedError("Adaptive DSpark is not ported to vLLM 0.34")
         variable_width = (os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1"
                           or os.environ.get("INKLING2_NGRAM_DRAFT", "0") == "1")
         if self.want_dspark and variable_width:
@@ -106,9 +108,10 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
                        for layer in range(self.n_layers)}
         super().load_weights(weights, experts=experts)
         if self.want_dspark:
-            from .dspark import InklingDraft
+            from .dspark import InklingDraft, bind_target
             self.draft = InklingDraft(self.checkpoint, device, self.max_context)
             self.draft.bind_target_head(self.lm_q8)
+            bind_target(self)
 
     def embed_input_ids(self, input_ids):
         return self.get_input_embeddings()(input_ids)
@@ -184,6 +187,10 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             if md.seq_lens.numel() != 1 or md.num_actual_tokens != size:
                 raise ValueError("Inkling XPU requires one unpadded sequence per forward")
             self.page_tokens = self.kv_layers[0].kv_cache.shape[2]
+            if not getattr(self, "_kv_layout_logged", False):
+                self._kv_layout_logged = True
+                logging.getLogger(__name__).warning("Inkling KV page_tokens=%d kv_cache.shape=%s",
+                                                    self.page_tokens, tuple(self.kv_layers[0].kv_cache.shape))
             total = int(md.seq_lens[0].item())
             return SimpleNamespace(caches=[layer.kv_cache for layer in self.kv_layers], block_table=md.block_table,
                                    seq_lens=md.seq_lens, out_cache_loc=md.slot_mapping[:size].long(),
