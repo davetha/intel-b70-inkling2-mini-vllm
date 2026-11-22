@@ -41,6 +41,12 @@ The production Qwen3.8-27B server ran the same Pi probe twice per length on the 
 | 55,000 | 14,347 / 16,635 | 2,160 / 1,630 | 6.68 / 10.30 s |
 | 105,000 | 25,773 / 31,376 | 2,084 / 1,773 | 12.41 / 17.77 s |
 
+## Near-full coding qualification
+
+For the same 69-file Django repair, seed 42 and 4,096-token Pi retention, increasing only the vLLM scheduler chunk reduced initial cold prefill from 184.44 to 175.50 seconds at 240,518 Inkling tokens. Throughput rose from 1,304 to 1,370 tokens/s (+5.1%). The production Qwen control took 197.10 seconds on the same input text (198,579 tokens). These three runs all produced patches that passed the independent official tests. [Reference runs](../quality/long-pi.md) · [4,096-chunk run](measurements.json)
+
+Pi compacted successfully at 245,826 tokens with the larger chunk. Its next actual request used 7,722 tokens. End to end, the 4,096-chunk session took 874.9 seconds, compared with 611.2 seconds for the 2,048-chunk session and 585.0 seconds for Qwen. The larger-chunk trajectory included long-running Django test commands. This single paired repair supports the prefill improvement and provides no evidence of faster task completion. The larger chunk is an opt-in setting for prompt processing.
+
 ## Reproducing the Pi measurement
 
 Prepare the frozen Django source corpus and Pi client described in the [replay instructions](../quality/replay/README.md). Give the benchmark exclusive access to one already running endpoint. Each execution of the probe starts a fresh Pi session per observation, warms with a short prompt, then submits three lengths twice with independent cache salts. It verifies zero input cache hits. Engine throughput uses the vLLM prefill timer. Client TTFT counts time from forwarding the HTTP request to the first nonempty output or reasoning delta. Runner startup, model loading and Pi process startup are outside both timers.

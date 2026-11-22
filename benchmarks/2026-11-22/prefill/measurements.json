@@ -590,5 +590,33 @@
       "ttft_s": 12.461873842003115,
       "prompt_sha256": "2ba3c02b6e8291f64750ab5029dd29aff96e5d4e6bd7126855359a776fb01df4"
     }
-  ]
+  ],
+  "long_pi_4096_chunk": {
+    "profile": "chunk",
+    "seed": 42,
+    "seconds": 874.9300066709984,
+    "completed": true,
+    "grade": true,
+    "infra_failure": false,
+    "prompt_tokens": 240518,
+    "prefill_s": 175.49722548999853,
+    "first_decode_tps": 68.59330402314689,
+    "compactions": [
+      {
+        "tokensBefore": 245826,
+        "estimatedTokensAfter": 6195,
+        "aborted": false
+      }
+    ],
+    "patch_sha256": "1da9a0a80cb89cc2d7887ee00b882c4196d84b51a52187bd27987a9970995311",
+    "first_ttft_s": 175.82695756700195,
+    "first_cached": 0,
+    "first_prefill_tps": 1370.494600860268,
+    "actual_next_prompt_tokens": 7722,
+    "tool_calls": 61,
+    "requests": 63,
+    "prompt_sha256": "2b1ffefb9375a8af90ba8b3f0bbc135ece82556ac3f613e305d994731d05276a",
+    "patch_bytes": 4618,
+    "long_corpus_sha256": "b20b78ef01a9c486aff8928adb98dd9ba1cd4198cfb03b8d3240f19ca0696c8b"
+  }
 }

@@ -8,7 +8,7 @@ prefix reuse. A second recipe runs the Unsloth 4-bit GGUF in llama.cpp.
 
 For a Pi Coding Agent session that starts close to the 262,144-token limit, set `compaction.keepRecentTokens` to `4096` in the session profile and leave `reserveTokens` at `16384`. On one blind Django repair with 240,518 initial Inkling tokens, both seeds compacted and passed the official tests. With the default 20,000-token retention, both seeds exhausted the window. Medium reasoning and the 8,192-token thinking budget were active in all four runs. [Measured Pi settings and outcomes](benchmarks/2026-11-22/quality/long-pi.md)
 
-For faster prompt processing with adaptive DSpark, append `--max-num-batched-tokens 4096` to the coding launcher. On the B70 this improved cold prefill by 3.5–3.8% across 4.8K, 16.6K and 31.4K input tokens through Pi. At 31.4K, median time to first output fell from 18.44 to 17.77 seconds. [Qwen comparison, Strata Intel kernels and replay](benchmarks/2026-11-22/prefill/README.md)
+For faster prompt processing with adaptive DSpark, append `--max-num-batched-tokens 4096` to the coding launcher. On the B70 this improved cold prefill by 3.5–3.8% across 4.8K, 16.6K and 31.4K input tokens through Pi. At 31.4K, median time to first output fell from 18.44 to 17.77 seconds. At 240,518 tokens it saved 8.94 seconds of prefill. The long coding repair passed with both settings and took longer overall with the larger chunk. [Qwen comparison, Strata Intel kernels and replay](benchmarks/2026-11-22/prefill/README.md)
 
 ## Validated profile
 
