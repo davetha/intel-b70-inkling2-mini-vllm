@@ -129,6 +129,7 @@ if [[ ${INKLING2_AGENT_TOOLS:-0} == 1 ]]; then
     fi
 fi
 
+# vLLM 0.34 picks 64-token KV pages on XPU; 0.33 used 16, which the ring-prefix history granularity assumes.
 prefix_args=(--no-enable-prefix-caching)
 if [[ ${INKLING2_RING_PREFIX:-0} == 1 ]]; then
     # The plugin wraps KVCacheManager (inkling_xpu.ring_prefix.install) when INKLING2_RING_PREFIX=1.
@@ -197,4 +198,5 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" --e
     --served-model-name inkling2-mini-exl3-b70 --generation-config vllm --load-format safetensors \
     --host "${INKLING2_HOST:-127.0.0.1}" --port "$port" --max-model-len "$context" --max-num-seqs 1 \
     --max-num-batched-tokens "$batch" --gpu-memory-utilization 0.90 \
-    --dtype bfloat16 --kv-cache-dtype "$kv_type" "${prefix_args[@]}" --enforce-eager "${spec_args[@]}" "$@"
+    --dtype bfloat16 --kv-cache-dtype "$kv_type" "${prefix_args[@]}" --enforce-eager "${spec_args[@]}" \
+    --block-size 16 "$@"
