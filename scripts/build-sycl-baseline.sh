@@ -30,7 +30,7 @@ fi
 if [[ ${INKLING2_BUILD_DSPARK_TOP1:-0} == 1 ]]; then
     patches+=("$PWD/patches/llama-dspark-sycl-top1.patch")
 fi
-deadline=$(TZ=Europe/Berlin date -d 'today 22:45' +%s)
+deadline=${INKLING2_DEADLINE_EPOCH:-$(TZ=Europe/Berlin date -d 'today 22:45' +%s)}
 (( $(date +%s) + 38 * 60 < deadline ))
 
 docker image inspect "$builder" "$runtime" >/dev/null

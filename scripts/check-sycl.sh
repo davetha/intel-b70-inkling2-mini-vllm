@@ -21,7 +21,7 @@ case "$mode" in
         ;;
     *) echo 'Use paged or exl3.' >&2; exit 2 ;;
 esac
-deadline=$(TZ=Europe/Berlin date -d 'today 22:45' +%s)
+deadline=${INKLING2_DEADLINE_EPOCH:-$(TZ=Europe/Berlin date -d 'today 22:45' +%s)}
 if (( $(date +%s) + minutes * 60 >= deadline )); then
     echo "Der SYCL-Test braucht bis zu $minutes Minuten vor 22:45 Europe/Berlin." >&2
     exit 1
@@ -78,7 +78,7 @@ if [[ "$mode" == exl3 ]]; then
             --mount "type=bind,source=$output/exl3_moe_single.sycl,target=/opt/trellis-serve/$source_file,readonly" \
             --mount "type=bind,source=$output,target=/build" \
             --env "EXL3_MOE_OUT=$build_lib.new" --env "EXL3_MOE_FLAGS=-DEXL3_INKLING2 -DEXL3_MOE_PREFILL_MB=$tile_rows" \
-            --entrypoint /bin/bash "$builder" /opt/trellis-serve/xpu/scripts/build_moe.sh \
+            --env "CXX_STD=${INKLING2_CXX_STD:-c++17}" --entrypoint /bin/bash "$builder" /opt/trellis-serve/xpu/scripts/build_moe.sh \
             >"$output/exl3-compile.log" 2>&1
         if [[ -z ${INKLING2_EXL3_TEST_LIB:-} ]]; then
             library="/lab/.work/build/$lib_name.new"
@@ -103,7 +103,7 @@ if ! timeout --kill-after=10s 5m docker run --rm --name "$build_name" --network 
     --cpus 3 --memory 4g --user "$owner" \
     --mount "type=bind,source=$vendor,target=/opt/trellis-serve,readonly" \
     --mount "type=bind,source=$output,target=/build" \
-    --env INKLING2_OUT=/build/inkling2-vllm.so.new --entrypoint /bin/bash "$builder" \
+    --env INKLING2_OUT=/build/inkling2-vllm.so.new --env "CXX_STD=${INKLING2_CXX_STD:-c++17}" --entrypoint /bin/bash "$builder" \
     /opt/trellis-serve/xpu/scripts/build_inkling2.sh >"$output/compile.log" 2>&1; then
     tail -60 "$output/compile.log" >&2
     exit 1

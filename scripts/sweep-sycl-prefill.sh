@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cd -- "$(dirname -- "$0")/.."
-deadline=$(TZ=Europe/Berlin date -d 'today 22:44' +%s)
+deadline=${INKLING2_DEADLINE_EPOCH:-$(TZ=Europe/Berlin date -d 'today 22:44' +%s)}
 seconds=$(( deadline - $(date +%s) ))
 (( seconds > 60 ))
 if (( seconds > 900 )); then

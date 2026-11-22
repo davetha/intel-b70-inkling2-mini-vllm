@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
-deadline=$(TZ=Europe/Berlin date -d 'today 22:45' +%s)
+deadline=${INKLING2_DEADLINE_EPOCH:-$(TZ=Europe/Berlin date -d 'today 22:45' +%s)}
 (( $(date +%s) + 400 < deadline ))
 runtime=${INKLING2_RUNTIME:-sha256:131dd9e11809de2f3136547618f130ee238f0b90cd5718567bcdd0dad5360e19}
 render_node=$(readlink -f -- "${INKLING2_RENDER_NODE:-/dev/dri/by-path/pci-0000:03:00.0-render}")

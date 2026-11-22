@@ -13,7 +13,7 @@ vendor="$PWD/.work/trellis-serve"
 work="$PWD/.work/vllm-inkling"
 name=inkling2-vllm-exl3
 
-deadline=$(TZ=Europe/Berlin date -d 'today 22:44' +%s)
+deadline=${INKLING2_DEADLINE_EPOCH:-$(TZ=Europe/Berlin date -d 'today 22:44' +%s)}
 seconds=$(( deadline - $(date +%s) ))
 (( seconds > 120 ))
 test -c "$render_node"
@@ -24,7 +24,7 @@ for lib in "${INKLING2_LIB:-/lab/.work/build/inkling2-vllm.so}" "${INKLING2_EXL3
     fi
 done
 if [[ ${INKLING2_VLLM_DSPARK:-0} == 1 ]]; then
-    test -s models/exl3/mtp.safetensors || { echo "Missing models/exl3/mtp.safetensors" >&2; exit 1; }
+    test -s ${INKLING2_MODEL_DIR:-models/exl3}/mtp.safetensors || { echo "Missing ${INKLING2_MODEL_DIR:-models/exl3}/mtp.safetensors" >&2; exit 1; }
 fi
 mkdir -p "$work"
 exec 8>"$work/serve.lock"
@@ -57,12 +57,12 @@ cat > "$work/plugin/inkling2_b70-0.1.dist-info/entry_points.txt" <<'EOF'
 [vllm.general_plugins]
 inkling2_b70 = inkling_xpu.vllm_plugin:register
 EOF
-python3 - "$work/config/config.json" <<'PY'
+python3 - "$work/config/config.json" "${INKLING2_MODEL_DIR:-models/exl3}" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-checkpoint = json.loads(Path('models/exl3/config.json').read_text())
+checkpoint = json.loads(Path(sys.argv[2], "config.json").read_text())
 text = checkpoint['text_config']
 config = {key: text[key] for key in ('hidden_size', 'num_attention_heads', 'num_key_value_heads',
                                      'head_dim', 'intermediate_size', 'rms_norm_eps')}
@@ -200,9 +200,9 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env "INKLING2_W8A8_LIBRARY=${INKLING2_W8A8_LIBRARY:-}" \
     --env HF_HUB_OFFLINE=1 --env OMP_NUM_THREADS=4 --env SYCL_CACHE_PERSISTENT=0 \
     --env ONEAPI_DEVICE_SELECTOR=level_zero:gpu --env "SYCL_UR_USE_LEVEL_ZERO_V2=${INKLING2_UR_LEVEL_ZERO_V2:-${INKLING2_DECODE_GRAPH:-0}}" \
-    --entrypoint /opt/venv/bin/vllm "$runtime" serve /lab/models/exl3 \
-    --hf-config-path /lab/.work/vllm-inkling/config --tokenizer /lab/models/exl3 \
+    --entrypoint /opt/venv/bin/vllm "$runtime" serve /lab/${INKLING2_MODEL_DIR:-models/exl3} \
+    --hf-config-path /lab/.work/vllm-inkling/config --tokenizer /lab/${INKLING2_MODEL_DIR:-models/exl3} \
     --served-model-name inkling2-mini-exl3-b70 --generation-config vllm --load-format safetensors \
-    --host 127.0.0.1 --port "$port" --max-model-len "$context" --max-num-seqs 1 \
+    --host "${INKLING2_HOST:-127.0.0.1}" --port "$port" --max-model-len "$context" --max-num-seqs 1 \
     --max-num-batched-tokens "$batch" --gpu-memory-utilization 0.90 \
     --dtype bfloat16 --kv-cache-dtype "$kv_type" "${prefix_args[@]}" --enforce-eager "${spec_args[@]}" "$@"

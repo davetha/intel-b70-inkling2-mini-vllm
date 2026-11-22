@@ -39,7 +39,7 @@ test -c "$render_node"
 power_cap=(/sys/class/drm/"${render_node##*/}"/device/hwmon/hwmon*/power1_cap)
 test "$(cat "${power_cap[0]}")" = 180000000
 
-deadline=$(TZ=Europe/Berlin date -d 'today 22:44' +%s)
+deadline=${INKLING2_DEADLINE_EPOCH:-$(TZ=Europe/Berlin date -d 'today 22:44' +%s)}
 seconds=$(( deadline - $(date +%s) ))
 (( seconds > 60 ))
 mkdir -p .work/sycl-program-cache

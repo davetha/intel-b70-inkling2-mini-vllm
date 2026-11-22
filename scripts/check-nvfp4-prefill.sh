@@ -7,7 +7,7 @@ image=${INKLING2_RUNTIME:-sha256:131dd9e11809de2f3136547618f130ee238f0b90cd57185
 builder=${INKLING2_BUILDER:-sha256:ae6950731b3c031f812a95c0eb615a572239426440bf67fd1b3c9c9cbfce9eca}
 render_node=$(readlink -f -- "${INKLING2_RENDER_NODE:-/dev/dri/by-path/pci-0000:03:00.0-render}")
 name="inkling2-nvfp4-check-$$"
-deadline=$(TZ=Europe/Berlin date -d 'today 22:44' +%s)
+deadline=${INKLING2_DEADLINE_EPOCH:-$(TZ=Europe/Berlin date -d 'today 22:44' +%s)}
 (( $(date +%s) + 5 * 60 < deadline ))
 if systemctl --user is-active --quiet b70-qwen38-vllm.service || \
    [[ -n $(docker ps --filter name=inkling2 --format '{{.Names}}' | rg -v 'build' || true) ]]; then
