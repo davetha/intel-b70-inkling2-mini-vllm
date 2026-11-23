@@ -384,12 +384,12 @@ class DraftSampling:
         )
 
 
-def ngram_continuation(tokens, low, high, depth):
+def ngram_continuation(tokens, low, high, depth, with_length=False):
     """Continuation after the longest (then most recent) earlier match of the trailing n-gram."""
     n = len(tokens)
     ends = np.flatnonzero(tokens[: n - 1] == tokens[n - 1])
     if not len(ends):
-        return None
+        return (None, 0) if with_length else None
     length = np.ones(len(ends), dtype=np.int64)
     alive = np.ones(len(ends), dtype=bool)
     for j in range(1, min(high, n)):
@@ -401,10 +401,11 @@ def ngram_continuation(tokens, low, high, depth):
         length += alive
     good = np.flatnonzero(length >= low)
     if not len(good):
-        return None
+        return (None, int(length.max())) if with_length else None
     best = good[np.lexsort((ends[good], length[good]))[-1]]
     first = int(ends[best]) + 1
-    return tokens[first : first + depth].tolist()
+    copied = tokens[first : first + depth].tolist()
+    return (copied, int(length[best])) if with_length else copied
 
 
 class InklingDSparkSpeculator(BaseSpeculator):
@@ -437,6 +438,22 @@ class InklingDSparkSpeculator(BaseSpeculator):
                 (1, self.width - self.dspark_steps), -1, device=device, dtype=torch.long
             )
             self.ngram_rounds = 0
+            # INKLING2_NGRAM_GATE=1: per request, keep an EMA of tokens accepted per n-gram round. While it is below
+            # GATE_ACCEPT only matches of at least GATE_LONG tokens are copied (DSpark drafts the rest), so fresh text
+            # stops paying for rejected copy rows; a long match that is accepted re-enables short matches.
+            self.gate = os.environ.get("INKLING2_NGRAM_GATE", "0") == "1"
+            self.gate_accept = float(os.environ.get("INKLING2_NGRAM_GATE_ACCEPT", "2.0"))
+            self.gate_long = int(os.environ.get("INKLING2_NGRAM_GATE_LONG", "12"))
+            self.gate_decay = float(os.environ.get("INKLING2_NGRAM_GATE_DECAY", "0.5"))
+            # Matches shorter than GATE_LONG copy at most SHORT_DEPTH tokens (default: full width).
+            self.short_depth = int(os.environ.get("INKLING2_NGRAM_SHORT_DEPTH", str(self.width)))
+            if not 0 <= self.gate_decay < 1 or not 1 <= self.short_depth <= self.width:
+                raise ValueError("Invalid n-gram gate settings")
+            self.gate_req = None
+            self.gate_ema = float(self.width)
+            self.last_round = None
+            trace = os.environ.get("INKLING2_NGRAM_TRACE")
+            self.trace = open(trace, "a", buffering=1 << 16) if trace else None
 
     @property
     def target(self):
@@ -497,6 +514,21 @@ class InklingDSparkSpeculator(BaseSpeculator):
         length, sampled = torch.stack(
             [self.req_states.total_len.gpu[req].long(), num_sampled[0].long()]
         ).tolist()
+        if input_batch.req_ids[0] != self.gate_req:
+            self.gate_req = input_batch.req_ids[0]
+            self.gate_ema = float(self.width)
+            self.last_round = None
+            if self.trace is not None:
+                self.trace.write("req\n")
+                self.trace.flush()
+        if self.last_round is not None and sampled > 0:
+            kind, match, count = self.last_round
+            accepted = min(sampled - 1, count)
+            if kind == "ngram":
+                self.gate_ema = self.gate_decay * self.gate_ema + (1 - self.gate_decay) * accepted
+            if self.trace is not None:
+                self.trace.write(f"{kind} {match} {count} {accepted}\n")
+        self.last_round = ("dspark", 0, self.dspark_steps)
         if sampled <= 0 or length <= self.ngram_min:
             return None
         history = getattr(self.req_states.all_token_ids, "_uva_buf", None)
@@ -504,9 +536,15 @@ class InklingDSparkSpeculator(BaseSpeculator):
             tokens = history.np[req, :length]
         else:
             tokens = self.req_states.all_token_ids.gpu[req, :length].cpu().numpy()
-        copied = ngram_continuation(tokens, self.ngram_min, self.ngram_max, self.width)
+        copied, match = ngram_continuation(tokens, self.ngram_min, self.ngram_max, self.width, with_length=True)
         if copied is None:
             return None
+        if match < self.gate_long:
+            if self.gate and self.gate_ema < self.gate_accept:
+                self.last_round = ("skip", match, self.dspark_steps)
+                return None
+            copied = copied[: self.short_depth]
+        self.last_round = ("ngram", match, len(copied))
         self.ngram_rounds += 1
         count = len(copied)
         row = torch.tensor(
