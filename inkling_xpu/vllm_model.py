@@ -18,6 +18,7 @@ from vllm.v1.attention.backends.triton_attn import TritonAttentionBackend
 
 from . import packed_kv
 from .exl3_experts import InklingEXL3Experts
+from .iqr_experts import InklingIQRExperts
 from .paged_attention import decode_paged
 from .prefix_attention import hybrid_prefill
 from .split_attention import local_xmx, paged_splits, paged_xmx
@@ -110,11 +111,16 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             moe_ops().moe_set_tiny_dpas(4, 9, 18)
         # INKLING2_EXPERTS=native keeps the checkpoint's NVFP4/MXFP8 experts (the model's training precision);
         # the base loader then builds Trellis' SYCL experts from them. The default re-packs EXL3 experts.
-        if os.environ.get("INKLING2_EXPERTS", "exl3") == "native":
+        # INKLING2_EXPERTS=iqr4 loads GPTQ 4-bit IQR experts (iqr-layer-*.safetensors, iqr_moe library).
+        kind = os.environ.get("INKLING2_EXPERTS", "exl3")
+        if kind == "native":
             experts = None
-        else:
-            experts = {layer: InklingEXL3Experts(self.checkpoint, layer, device, self.tc["n_routed_experts"])
+        elif kind in ("exl3", "iqr4"):
+            cls = InklingIQRExperts if kind == "iqr4" else InklingEXL3Experts
+            experts = {layer: cls(self.checkpoint, layer, device, self.tc["n_routed_experts"])
                        for layer in range(self.n_layers)}
+        else:
+            raise ValueError(f"INKLING2_EXPERTS must be exl3, iqr4 or native, not {kind!r}")
         super().load_weights(weights, experts=experts)
         self.prefill_depth = None
         if os.environ.get("INKLING2_PREFILL_DEPTH", "0") == "1":

@@ -1,0 +1,588 @@
+// SPDX-License-Identifier: MIT
+// IQR 4-bit routed experts for Inkling 2 Mini on the Arc Pro B70 (Xe2): torch library `iqr_moe`.
+//
+// Format (per expert, see inkling_xpu/iqr_experts.py for the packer): weights are stored in the 128-wide normalized
+// Walsh-Hadamard basis of their input dim (W_r = W R), as signed 4-bit codes (u4 = value + 8) with one bf16 scale per
+// (output row, 128 of K). Expert blob = gate_up codes [144 tiles][18 K-groups][1024 B] | gate_up scales [144][18][16]
+// bf16 | down codes [144][9][1024 B] | down scales [144][9][16] bf16. A gate_up tile holds 8 gate + 8 up rows of the
+// same 8 intermediate columns; a down tile holds 16 output columns. In a (tile, group) block, byte (d*64+q*16+lane)*4+i
+// holds k = 32d+4q+i (low nibble) and k = 32d+16+4q+i (high nibble) of row `lane`: the int8 DPAS B layout after
+// and/shift.
+// Arithmetic: inputs are rotated and quantized to int8 per (row, 128) (absmax/127); int8 x u8 DPAS, the code zero
+// point is folded as acc - 8*sum(a); bf16 weight scale x activation scale per 128 of K in fp32. The activation is
+// Inkling's softcapped SwiGLU; its output is rotated and quantized the same way for the down projection.
+// Decode (M <= 8 rows): in-kernel grouping of (row, slot) pairs by expert, every touched expert read once.
+// Prefill (M > 8): one-WG align (pairs sorted by expert into MB-row blocks), int8-DPAS tiled GEMMs per block.
+// Both paths write y[pair] = w * down(pair) in fp32; a combine kernel sums the 8 slots of a row in fixed order, so
+// results are deterministic and the whole forward is graph-replay safe (no host reads, shapes only).
+#include <torch/all.h>
+#include <torch/library.h>
+#include <c10/xpu/XPUStream.h>
+#include <sycl/sycl.hpp>
+#include <sycl/ext/intel/esimd.hpp>
+#include <sycl/ext/intel/experimental/grf_size_properties.hpp>
+
+using namespace sycl::ext::intel::esimd;
+namespace xmx = sycl::ext::intel::esimd::xmx;
+
+namespace iqr {
+
+constexpr int HID = 2304, INT = 1152, TOPK = 8, MAXP = 64, BPG = 1024;
+constexpr int GU_T = 144, GU_G = 18, DN_T = 144, DN_G = 9;
+constexpr size_t GU_CODES = size_t(GU_T) * GU_G * BPG, GU_SC = size_t(GU_T) * GU_G * 32;
+constexpr size_t DN_CODES = size_t(DN_T) * DN_G * BPG, DN_SC = size_t(DN_T) * DN_G * 32;
+constexpr size_t BLOB = GU_CODES + GU_SC + DN_CODES + DN_SC;
+constexpr float INV_SQRT128 = 0.08838834764831845f;
+
+// ------------------------------------------------------------------ device helpers
+template <int H, int N> ESIMD_INLINE void fwht_step(simd<float, N>& v) {
+    auto m = v.template bit_cast_view<float, N / (2 * H), 2 * H>();
+    simd<float, N / 2> a = m.template select<N / (2 * H), 1, H, 1>(0, 0);
+    simd<float, N / 2> b = m.template select<N / (2 * H), 1, H, 1>(0, H);
+    m.template select<N / (2 * H), 1, H, 1>(0, 0) = a + b;
+    m.template select<N / (2 * H), 1, H, 1>(0, H) = a - b;
+}
+ESIMD_INLINE void fwht128(simd<float, 128>& v) {
+    fwht_step<1>(v); fwht_step<2>(v); fwht_step<4>(v); fwht_step<8>(v);
+    fwht_step<16>(v); fwht_step<32>(v); fwht_step<64>(v);
+}
+// rotate (unnormalized WHT) + quantize one 128-block: q = rne(v*127/amax), scale = amax/127/sqrt(128), sum(q)
+ESIMD_INLINE void rotq_store(simd<float, 128> v, int8_t* qdst, float* sdst, int* sumdst) {
+    fwht128(v);
+    simd<float, 128> av = abs(v);
+    float amax = hmax<float>(av);
+    float inv = amax > 0.f ? 127.f / amax : 0.f;
+    simd<float, 128> r = rnde<float>(v * inv);
+    simd<int, 128> qi = r;
+    simd<int8_t, 128> qb = qi;
+    block_store<uint32_t, 32>(reinterpret_cast<uint32_t*>(qdst), qb.template bit_cast_view<uint32_t>().read());
+    int sum = reduce<int>(qi, std::plus<>());
+    simd<uint32_t, 1> o0 = 0;
+    scatter<float, 1>(sdst, o0, simd<float, 1>(amax * (1.f / 127.f) * INV_SQRT128));
+    scatter<int, 1>(sumdst, o0, simd<int, 1>(sum));
+}
+ESIMD_INLINE simd<float, 16> bf16x16(const uint16_t* p) {
+    simd<uint16_t, 16> s = block_load<uint16_t, 16>(p);
+    simd<uint32_t, 16> u = s;
+    u <<= 16;
+    return u.template bit_cast_view<float>().read();
+}
+// Inkling 2 expert activation: 4 tanh(g/4) sigmoid(g) * 25 tanh(u/25) (same form as the EXL3 kernels)
+template <int N> ESIMD_INLINE simd<float, N> act(simd<float, N> g, simd<float, N> u) {
+    simd<float, N> cg = 4.0f * (2.0f / (1.0f + exp(-g * 0.5f)) - 1.0f);
+    simd<float, N> cu = 25.0f * (2.0f / (1.0f + exp(-u * 0.08f)) - 1.0f);
+    return cg / (1.0f + exp(-g)) * cu;
+}
+// one 32-K chunk d of a (tile, group) block -> DPAS B operand (8 VNNI rows x 16 lanes of u8 codes)
+ESIMD_INLINE simd<uint32_t, 128> decode_chunk(const uint8_t* gp, int d) {
+    simd<uint32_t, 128> B;
+    simd<uint32_t, 64> c = block_load<uint32_t, 64>(reinterpret_cast<const uint32_t*>(gp + d * 256));
+    B.template select<64, 1>(0) = c & 0x0F0F0F0Fu;
+    B.template select<64, 1>(64) = (c >> 4) & 0x0F0F0F0Fu;
+    return B;
+}
+
+// ------------------------------------------------------------------ decode (M <= 8)
+// acc[RC x 16] += groups [g0, g0+ng) of one tile against RC activation rows (rows[r] = activation row index)
+template <int RC>
+ESIMD_INLINE void tile_gemm(const uint8_t* w, const uint16_t* ws, int g0, int ng, const int8_t* a, const float* as,
+                            const int* asum, simd<int, 8> rows, int K, int G, simd<float, RC * 16>& acc) {
+    simd<uint32_t, RC> roff_s;
+    for (int r = 0; r < RC; ++r) roff_s[r] = uint32_t(rows[r] * G) * 4u;
+    for (int g = g0; g < g0 + ng; ++g) {
+        const uint8_t* gp = w + size_t(g) * BPG;
+        simd<uint32_t, RC * 32> A;
+#pragma unroll
+        for (int r = 0; r < RC; ++r)
+            A.template select<32, 1>(r * 32) =
+                block_load<uint32_t, 32>(reinterpret_cast<const uint32_t*>(a + size_t(rows[r]) * K + g * 128));
+        simd<float, RC> sa = gather<float, RC>(as, roff_s + uint32_t(g * 4));
+        simd<int, RC> su = gather<int, RC>(asum, roff_s + uint32_t(g * 4));
+        simd<float, 16> sw = bf16x16(ws + g * 16);
+        simd<int, RC * 16> ai = 0;
+#pragma unroll
+        for (int d = 0; d < 4; ++d) {
+            simd<uint32_t, 128> B = decode_chunk(gp, d);
+            simd<uint32_t, RC * 8> Ad;
+#pragma unroll
+            for (int r = 0; r < RC; ++r) Ad.template select<8, 1>(r * 8) = A.template select<8, 1>(r * 32 + d * 8);
+            ai = xmx::dpas<8, RC, int, int, uint32_t, uint32_t, xmx::dpas_argument_type::u8,
+                           xmx::dpas_argument_type::s8>(ai, B, Ad);
+        }
+#pragma unroll
+        for (int r = 0; r < RC; ++r) {
+            simd<int, 16> v = ai.template select<16, 1>(r * 16);
+            v -= 8 * int(su[r]);
+            simd<float, 16> fv = v;
+            acc.template select<16, 1>(r * 16) += fv * (sw * float(sa[r]));
+        }
+    }
+}
+
+// pairs routed to the expert of pair p (ids padded to 64 with -1); false if an earlier pair owns that expert
+ESIMD_INLINE bool group_pairs(const int* ids, int p, int np, simd<int, 8>& pairs, int& cnt) {
+    simd<int, MAXP> id = block_load<int, MAXP>(ids);
+    int e = id[p];
+    cnt = 0;
+    pairs = 0;
+    for (int q = 0; q < np; ++q) {
+        if (id[q] == e) {
+            if (q < p) return false;
+            pairs[cnt] = q;
+            ++cnt;
+        }
+    }
+    for (int r = cnt; r < 8; ++r) pairs[r] = pairs[0];
+    return true;
+}
+
+struct Act {  // int8 rotated activations: q [rows][K], scale and code sum per (row, 128)
+    int8_t* q; float* s; int* sum;
+};
+
+// rotate + quantize the bf16 layer input (WG per row, 18 threads = one 128-block each); optionally pad the routing
+// ids to 64 entries (-1) for the decode kernels
+struct QuantX {
+    const uint16_t* x; int xstride; Act a; const int* ids; int* ids64; int np;
+    void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+        const int m = it.get_group(0), blk = it.get_local_id(0);
+        simd<float, 128> v;
+#pragma unroll
+        for (int i = 0; i < 8; ++i) v.template select<16, 1>(i * 16) = bf16x16(x + size_t(m) * xstride + blk * 128 + i * 16);
+        rotq_store(v, a.q + size_t(m) * HID + blk * 128, a.s + m * GU_G + blk, a.sum + m * GU_G + blk);
+        if (ids64 && m == 0 && blk < 4) {
+            simd<int, 16> idx(blk * 16, 1);
+            simd_mask<16> ok = idx < np;
+            simd<int, 16> v2 = gather<int, 16>(ids, simd<uint32_t, 16>(idx) * 4u, ok);
+            v2.merge(simd<int, 16>(-1), !ok);
+            block_store<int, 16>(ids64 + blk * 16, v2);
+        }
+    }
+};
+
+#ifndef IQR_KS1
+#define IQR_KS1 2
+#endif
+#ifndef IQR_KS2
+#define IQR_KS2 1
+#endif
+#ifndef IQR_TW
+#define IQR_TW 16
+#endif
+constexpr int KS1 = IQR_KS1, KS2 = IQR_KS2, TW = IQR_TW;
+constexpr int DEC_SLM_H = 16384, DEC_SLM = 16384 + 4096;
+
+// gate_up + activation + rotate/quantize h. Grid: 64 pair slots x 9 blocks of 128 intermediate; WG = 16 tiles x KS1.
+template <int RC>
+ESIMD_INLINE void gu_body(const uint8_t* ex, Act x, Act h, int blk, int t, int s, int l, simd<int, 8> pairs, int cnt) {
+    const uint8_t* wc = ex + size_t(blk * 16 + t) * GU_G * BPG;
+    const uint16_t* wsc = reinterpret_cast<const uint16_t*>(ex + GU_CODES) + size_t(blk * 16 + t) * GU_G * 16;
+    simd<int, 8> rows = pairs >> 3;
+    simd<float, RC * 16> acc = 0;
+    constexpr int NG = GU_G / KS1;
+    tile_gemm<RC>(wc, wsc, s * NG, NG, x.q, x.s, x.sum, rows, HID, GU_G, acc);
+    if constexpr (KS1 > 1) {
+        if (s > 0) slm_block_store<float, RC * 16>(((s - 1) * 16 + t) * RC * 64, acc);
+        barrier();
+        if (s == 0)
+            for (int j = 1; j < KS1; ++j) acc += slm_block_load<float, RC * 16>(((j - 1) * 16 + t) * RC * 64);
+    }
+    if (s == 0) {
+#pragma unroll
+        for (int r = 0; r < RC; ++r) {
+            simd<float, 8> hv = act<8>(acc.template select<8, 1>(r * 16), acc.template select<8, 1>(r * 16 + 8));
+            slm_block_store<float, 8>(DEC_SLM_H + (r * 128 + t * 8) * 4, hv);
+        }
+    }
+    barrier();
+    if (l < cnt) {
+        int pr = pairs[l];
+        simd<float, 128> v = slm_block_load<float, 128>(DEC_SLM_H + l * 512);
+        rotq_store(v, h.q + size_t(pr) * INT + blk * 128, h.s + pr * DN_G + blk, h.sum + pr * DN_G + blk);
+    }
+}
+struct GateUpDec {
+    const uint8_t* arena; const int* ids64; int np; Act x, h;
+    void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+        slm_init<DEC_SLM>();
+        const int gid = it.get_group(0), p = gid / 9, blk = gid % 9, l = it.get_local_id(0), t = l % 16, s = l / 16;
+        if (p >= np) return;
+        simd<int, 8> pairs; int cnt;
+        if (!group_pairs(ids64, p, np, pairs, cnt)) return;
+        simd<int, MAXP> id = block_load<int, MAXP>(ids64);
+        const uint8_t* ex = arena + size_t(id[p]) * BLOB;
+        if (cnt <= 1) gu_body<1>(ex, x, h, blk, t, s, l, pairs, cnt);
+        else if (cnt <= 2) gu_body<2>(ex, x, h, blk, t, s, l, pairs, cnt);
+        else if (cnt <= 4) gu_body<4>(ex, x, h, blk, t, s, l, pairs, cnt);
+        else gu_body<8>(ex, x, h, blk, t, s, l, pairs, cnt);
+    }
+};
+
+// down: y[pair, tile*16 + lane] = w[pair] * acc. Grid: 64 pair slots x 144/TW chunks; WG = TW tiles x KS2.
+template <int RC>
+ESIMD_INLINE void dn_body(const uint8_t* ex, const float* wts, Act h, float* y, int chunk, int t, int s,
+                          simd<int, 8> pairs, int cnt) {
+    const int tile = chunk * TW + t;
+    const uint8_t* wc = ex + GU_CODES + GU_SC + size_t(tile) * DN_G * BPG;
+    const uint16_t* wsc = reinterpret_cast<const uint16_t*>(ex + GU_CODES + GU_SC + DN_CODES) + size_t(tile) * DN_G * 16;
+    simd<float, RC * 16> acc = 0;
+    constexpr int NG = DN_G / KS2;
+    tile_gemm<RC>(wc, wsc, s * NG, NG, h.q, h.s, h.sum, pairs, INT, DN_G, acc);
+    if constexpr (KS2 > 1) {
+        if (s > 0) slm_block_store<float, RC * 16>(((s - 1) * TW + t) * RC * 64, acc);
+        barrier();
+        if (s == 0)
+            for (int j = 1; j < KS2; ++j) acc += slm_block_load<float, RC * 16>(((j - 1) * TW + t) * RC * 64);
+    }
+    if (s == 0) {
+        for (int r = 0; r < cnt; ++r) {
+            const int pr = pairs[r];
+            simd<float, 1> wv = gather<float, 1>(wts, simd<uint32_t, 1>(pr * 4));
+            block_store<float, 16>(y + size_t(pr) * HID + tile * 16, acc.template select<16, 1>(r * 16) * float(wv[0]));
+        }
+    }
+}
+struct DownDec {
+    const uint8_t* arena; const int* ids64; const float* wts; int np; Act h; float* y;
+    void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+        slm_init<(KS2 > 1 ? (KS2 - 1) * TW * 8 * 64 : 64)>();
+        constexpr int nch = DN_T / TW;
+        const int gid = it.get_group(0), p = gid / nch, chunk = gid % nch, l = it.get_local_id(0), t = l % TW, s = l / TW;
+        if (p >= np) return;
+        simd<int, 8> pairs; int cnt;
+        if (!group_pairs(ids64, p, np, pairs, cnt)) return;
+        simd<int, MAXP> id = block_load<int, MAXP>(ids64);
+        const uint8_t* ex = arena + size_t(id[p]) * BLOB;
+        if (cnt <= 1) dn_body<1>(ex, wts, h, y, chunk, t, s, pairs, cnt);
+        else if (cnt <= 2) dn_body<2>(ex, wts, h, y, chunk, t, s, pairs, cnt);
+        else if (cnt <= 4) dn_body<4>(ex, wts, h, y, chunk, t, s, pairs, cnt);
+        else dn_body<8>(ex, wts, h, y, chunk, t, s, pairs, cnt);
+    }
+};
+
+// out[m, :] = bf16(sum_k y[m*8 + k, :]) in fixed k order. One item per (row, 128 columns).
+struct Combine {
+    const float* y; uint16_t* out; int M, out_stride;
+    void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+        const int id = it.get_global_id(0), m = id / GU_G, nb = id % GU_G;
+        if (m >= M) return;
+        simd<float, 128> v = 0.f;
+        for (int k = 0; k < TOPK; ++k) v += block_load<float, 128>(y + size_t(m * TOPK + k) * HID + nb * 128);
+        // round to nearest even bf16
+        simd<uint32_t, 128> u = v.template bit_cast_view<uint32_t>();
+        simd<uint32_t, 128> r = (u + 0x7FFFu + ((u >> 16) & 1u)) >> 16;
+        simd<uint16_t, 128> o = r;
+        block_store<uint16_t, 128>(out + size_t(m) * out_stride + nb * 128, o);
+    }
+};
+
+// ------------------------------------------------------------------ prefill (M > 8)
+#ifndef IQR_MB
+#define IQR_MB 32
+#endif
+#ifndef IQR_NT
+#define IQR_NT 1
+#endif
+constexpr int MB = IQR_MB, NT = IQR_NT, PARTS = 3;
+constexpr int PT = GU_T / PARTS;        // tiles per partition (48)
+constexpr int PTH = PT / NT;            // threads per WG
+static_assert(MB % 8 == 0 && PT % NT == 0 && (16 % NT) == 0, "prefill geometry");
+
+// Pairs sorted by expert into MB-row blocks: blk_e[b], blk_n[b] (rows), slot[b*MB + r] = pair index (-1 = padding).
+struct Route { int* blk_e; int* blk_n; int* slot; int* n_blk; };
+
+static void launch_align(sycl::queue& q, const int* ids, int np, int E, Route rt, int max_slots) {
+    q.submit([&](sycl::handler& h) {
+        sycl::local_accessor<int, 1> cnt(E, h), start(E, h), cur(E, h);
+        h.parallel_for(sycl::nd_range<1>(1024, 1024), [=](sycl::nd_item<1> it) {
+            const int l = it.get_local_id(0);
+            for (int e = l; e < E; e += 1024) { cnt[e] = 0; cur[e] = 0; }
+            for (int i = l; i < max_slots; i += 1024) rt.slot[i] = -1;
+            sycl::group_barrier(it.get_group());
+            for (int p = l; p < np; p += 1024)
+                sycl::atomic_ref<int, sycl::memory_order::relaxed, sycl::memory_scope::work_group,
+                                 sycl::access::address_space::local_space>(cnt[ids[p]]).fetch_add(1);
+            sycl::group_barrier(it.get_group());
+            if (l == 0) {
+                int b = 0;
+                for (int e = 0; e < E; ++e) {
+                    start[e] = b;
+                    for (int r0 = 0; r0 < cnt[e]; r0 += MB, ++b) {
+                        rt.blk_e[b] = e;
+                        rt.blk_n[b] = cnt[e] - r0 < MB ? cnt[e] - r0 : MB;
+                    }
+                }
+                rt.n_blk[0] = b;
+            }
+            sycl::group_barrier(it.get_group());
+            for (int p = l; p < np; p += 1024) {
+                const int e = ids[p];
+                const int r = sycl::atomic_ref<int, sycl::memory_order::relaxed, sycl::memory_scope::work_group,
+                                               sycl::access::address_space::local_space>(cur[e]).fetch_add(1);
+                rt.slot[start[e] * MB + r] = p;
+            }
+        });
+    });
+}
+
+// SLM layout shared by both prefill GEMMs: A double buffer [2][MB/8][4][8 rows][8 dwords], then sa[G][MB], su[G][MB],
+// then the epilogue staging area.
+constexpr int SLM_A = 2 * MB * 128;
+template <int G> constexpr int slm_sa() { return SLM_A; }
+template <int G> constexpr int slm_su() { return SLM_A + G * MB * 4; }
+template <int G> constexpr int slm_ep() { return SLM_A + 2 * G * MB * 4; }
+ESIMD_INLINE int a_off(int buf, int rb, int d) { return ((buf * (MB / 8) + rb) * 4 + d) * 256; }
+
+// activation row of slot m of block b: gate_up reads the token of the slot's pair, down reads the slot's own h row
+template <bool GU> ESIMD_INLINE int act_row(const int* slots, int b, int m, int nrows) {
+    if (m >= nrows) return -1;
+    if constexpr (GU) return slots[b * MB + m] >> 3;
+    else return b * MB + m;
+}
+// stage group g of the block's MB activation rows into SLM buffer buf (padding rows are zero)
+template <bool GU, int K>
+ESIMD_INLINE void stage_a(const int8_t* aq, const int* slots, int b, int nrows, int g, int buf, int t, int T) {
+    for (int m = t; m < MB; m += T) {
+        simd<uint32_t, 32> v = 0;
+        const int r = act_row<GU>(slots, b, m, nrows);
+        if (r >= 0) v = block_load<uint32_t, 32>(reinterpret_cast<const uint32_t*>(aq + size_t(r) * K + g * 128));
+#pragma unroll
+        for (int d = 0; d < 4; ++d) slm_block_store<uint32_t, 8>(a_off(buf, m / 8, d) + (m % 8) * 32, v.template select<8, 1>(d * 8));
+    }
+}
+
+// acc[NT][MB][16] += one K group for this thread's NT tiles (codes at wc[j] + g*BPG, scales ws[j] + g*16)
+template <int G>
+ESIMD_INLINE void block_group(const uint8_t* const* wc, const uint16_t* const* ws, int g, int buf, simd<float, NT * MB * 16>& acc) {
+    simd<uint32_t, NT * 512> B;
+    simd<float, NT * 16> sw;
+#pragma unroll
+    for (int j = 0; j < NT; ++j) {
+#pragma unroll
+        for (int d = 0; d < 4; ++d) B.template select<128, 1>((j * 4 + d) * 128) = decode_chunk(wc[j] + size_t(g) * BPG, d);
+        sw.template select<16, 1>(j * 16) = bf16x16(ws[j] + g * 16);
+    }
+#ifndef IQR_RB_UNROLL
+#define IQR_RB_UNROLL 1
+#endif
+#pragma unroll IQR_RB_UNROLL
+    for (int rb = 0; rb < MB / 8; ++rb) {
+        simd<float, 8> sa = slm_block_load<float, 8>(slm_sa<G>() + (g * MB + rb * 8) * 4);
+        simd<int, 8> su = slm_block_load<int, 8>(slm_su<G>() + (g * MB + rb * 8) * 4);
+        simd<int, NT * 128> ai = 0;
+#pragma unroll
+        for (int d = 0; d < 4; ++d) {
+            simd<uint32_t, 64> A = slm_block_load<uint32_t, 64>(a_off(buf, rb, d));
+#pragma unroll
+            for (int j = 0; j < NT; ++j)
+                ai.template select<128, 1>(j * 128) = xmx::dpas<8, 8, int, int, uint32_t, uint32_t, xmx::dpas_argument_type::u8,
+                    xmx::dpas_argument_type::s8>(simd<int, 128>(ai.template select<128, 1>(j * 128)),
+                                                 simd<uint32_t, 128>(B.template select<128, 1>((j * 4 + d) * 128)), A);
+        }
+#pragma unroll
+        for (int j = 0; j < NT; ++j)
+#pragma unroll
+            for (int r = 0; r < 8; ++r) {
+                simd<int, 16> v = ai.template select<16, 1>(j * 128 + r * 16);
+                v -= 8 * int(su[r]);
+                simd<float, 16> fv = v;
+                acc.template select<16, 1>((j * MB + rb * 8 + r) * 16) += fv * (sw.template select<16, 1>(j * 16) * float(sa[r]));
+            }
+    }
+}
+
+// load the per-(row, group) activation scale/sum of the block into SLM ([G][MB], zero for padding rows)
+template <bool GU, int G>
+ESIMD_INLINE void stage_scales(const float* as, const int* asum, const int* slots, int b, int nrows, int t, int T) {
+    for (int m = t; m < MB; m += T) {
+        const int r = act_row<GU>(slots, b, m, nrows);
+        for (int g = 0; g < G; ++g) {
+            float s = 0.f; int su = 0;
+            if (r >= 0) { s = as[r * G + g]; su = asum[r * G + g]; }
+            slm_scalar_store<float>(slm_sa<G>() + (g * MB + m) * 4, s);
+            slm_scalar_store<int>(slm_su<G>() + (g * MB + m) * 4, su);
+        }
+    }
+}
+
+// gate_up prefill: WG per (block b, partition of 48 tiles = 384 intermediates); writes h (rotated int8) per slot.
+struct GateUpPre {
+    const uint8_t* arena; Act x; Route rt; Act h;
+    auto get(sycl::ext::oneapi::experimental::properties_tag) const {
+        return sycl::ext::oneapi::experimental::properties{sycl::ext::intel::experimental::grf_size<256>};
+    }
+    void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+        slm_init<slm_ep<GU_G>() + MB * 128 * 4>();
+        const int t = it.get_local_id(0), T = PTH;
+        const int b = it.get_group(0) / PARTS, part = it.get_group(0) % PARTS;
+        if (b >= rt.n_blk[0]) return;
+        const int e = rt.blk_e[b], nrows = rt.blk_n[b];
+        const uint8_t* ex = arena + size_t(e) * BLOB;
+        const uint8_t* wc[NT]; const uint16_t* ws[NT];
+        const int tile0 = part * PT + t * NT;
+#pragma unroll
+        for (int j = 0; j < NT; ++j) {
+            wc[j] = ex + size_t(tile0 + j) * GU_G * BPG;
+            ws[j] = reinterpret_cast<const uint16_t*>(ex + GU_CODES) + size_t(tile0 + j) * GU_G * 16;
+        }
+        stage_scales<true, GU_G>(x.s, x.sum, rt.slot, b, nrows, t, T);
+        stage_a<true, HID>(x.q, rt.slot, b, nrows, 0, 0, t, T);
+        barrier();
+        simd<float, NT * MB * 16> acc = 0;
+        for (int g = 0; g < GU_G; ++g) {
+            if (g + 1 < GU_G) stage_a<true, HID>(x.q, rt.slot, b, nrows, g + 1, (g + 1) & 1, t, T);
+            block_group<GU_G>(wc, ws, g, g & 1, acc);
+            barrier();
+        }
+        // epilogue: per 128-block of h (16 tiles = 8 threads), activation -> SLM -> rotate + quantize per row
+        constexpr int EP = slm_ep<GU_G>();
+        for (int lb = 0; lb < PT / 16; ++lb) {
+            if ((t * NT) / 16 == lb) {
+#pragma unroll
+                for (int j = 0; j < NT; ++j) {
+                    const int tl = (t * NT + j) % 16;
+#pragma unroll
+                    for (int m = 0; m < MB; ++m) {
+                        simd<float, 8> hv = act<8>(acc.template select<8, 1>((j * MB + m) * 16),
+                                                   acc.template select<8, 1>((j * MB + m) * 16 + 8));
+                        slm_block_store<float, 8>(EP + (m * 128 + tl * 8) * 4, hv);
+                    }
+                }
+            }
+            barrier();
+            const int hb = part * (PT / 16) + lb;
+            for (int m = t; m < nrows; m += T) {
+                simd<float, 128> v = slm_block_load<float, 128>(EP + m * 512);
+                const int s = b * MB + m;
+                rotq_store(v, h.q + size_t(s) * INT + hb * 128, h.s + s * DN_G + hb, h.sum + s * DN_G + hb);
+            }
+            barrier();
+        }
+    }
+};
+
+// down prefill: WG per (block b, partition of 48 output tiles = 768 columns); y[pair] = w * acc (fp32).
+struct DownPre {
+    const uint8_t* arena; Act h; Route rt; const float* wts; float* y;
+    auto get(sycl::ext::oneapi::experimental::properties_tag) const {
+        return sycl::ext::oneapi::experimental::properties{sycl::ext::intel::experimental::grf_size<256>};
+    }
+    void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+        slm_init<slm_ep<DN_G>()>();
+        const int t = it.get_local_id(0), T = PTH;
+        const int b = it.get_group(0) / PARTS, part = it.get_group(0) % PARTS;
+        if (b >= rt.n_blk[0]) return;
+        const int e = rt.blk_e[b], nrows = rt.blk_n[b];
+        const uint8_t* ex = arena + size_t(e) * BLOB + GU_CODES + GU_SC;
+        const uint8_t* wc[NT]; const uint16_t* ws[NT];
+        const int tile0 = part * PT + t * NT;
+#pragma unroll
+        for (int j = 0; j < NT; ++j) {
+            wc[j] = ex + size_t(tile0 + j) * DN_G * BPG;
+            ws[j] = reinterpret_cast<const uint16_t*>(ex + DN_CODES) + size_t(tile0 + j) * DN_G * 16;
+        }
+        stage_scales<false, DN_G>(h.s, h.sum, rt.slot, b, nrows, t, T);
+        stage_a<false, INT>(h.q, rt.slot, b, nrows, 0, 0, t, T);
+        barrier();
+        simd<float, NT * MB * 16> acc = 0;
+        for (int g = 0; g < DN_G; ++g) {
+            if (g + 1 < DN_G) stage_a<false, INT>(h.q, rt.slot, b, nrows, g + 1, (g + 1) & 1, t, T);
+            block_group<DN_G>(wc, ws, g, g & 1, acc);
+            barrier();
+        }
+        const int* slots = rt.slot + b * MB;
+#pragma unroll
+        for (int m = 0; m < MB; ++m) {
+            if (m >= nrows) break;
+            const int p = slots[m];
+            simd<float, 1> wv = gather<float, 1>(wts, simd<uint32_t, 1>(uint32_t(p) * 4u));
+#pragma unroll
+            for (int j = 0; j < NT; ++j)
+                block_store<float, 16>(y + size_t(p) * HID + (tile0 + j) * 16, acc.template select<16, 1>((j * MB + m) * 16) * float(wv[0]));
+        }
+    }
+};
+
+// ------------------------------------------------------------------ host
+static sycl::queue& queue_of(const at::Tensor& t) { return c10::xpu::getCurrentXPUStream(t.device().index()).queue(); }
+
+at::Tensor moe_forward(at::Tensor x, at::Tensor topk_ids, at::Tensor topk_w, at::Tensor arena) {
+    TORCH_CHECK(x.is_xpu() && x.dim() == 2 && x.size(1) == HID && x.stride(1) == 1 && x.scalar_type() == at::kBFloat16,
+                "iqr_moe: x must be bf16 [M, 2304] with unit column stride");
+    TORCH_CHECK(topk_ids.scalar_type() == at::kInt && topk_ids.is_contiguous() && topk_ids.dim() == 2 &&
+                topk_ids.size(1) == TOPK && topk_ids.size(0) == x.size(0), "iqr_moe: topk_ids int32 [M, 8]");
+    TORCH_CHECK(topk_w.scalar_type() == at::kFloat && topk_w.is_contiguous() && topk_w.sizes() == topk_ids.sizes(),
+                "iqr_moe: topk_w fp32 [M, 8]");
+    TORCH_CHECK(arena.scalar_type() == at::kByte && arena.is_contiguous() && arena.dim() == 2 &&
+                arena.size(1) == (int64_t)BLOB, "iqr_moe: arena uint8 [E, blob]");
+    const int M = x.size(0), np = M * TOPK, E = arena.size(0);
+    auto out = at::empty({M, HID}, x.options());
+    if (M == 0) return out;
+    auto& q = queue_of(x);
+    auto i32 = x.options().dtype(at::kInt), f32 = x.options().dtype(at::kFloat), i8 = x.options().dtype(at::kChar);
+    auto xq = at::empty({M, HID}, i8);
+    auto xs = at::empty({M, GU_G}, f32), xsum = at::empty({M, GU_G}, i32);
+    auto y = at::empty({np, HID}, f32);
+    const uint8_t* ar = arena.data_ptr<uint8_t>();
+    const int* ids = topk_ids.data_ptr<int>();
+    const float* wts = topk_w.data_ptr<float>();
+    Act xa{xq.data_ptr<int8_t>(), xs.data_ptr<float>(), xsum.data_ptr<int>()};
+    const uint16_t* xp = reinterpret_cast<const uint16_t*>(x.data_ptr());
+    if (M <= 8) {
+        auto ids64 = at::empty({MAXP}, i32);
+        auto hq = at::empty({np, INT}, i8);
+        auto hs = at::empty({np, DN_G}, f32), hsum = at::empty({np, DN_G}, i32);
+        Act ha{hq.data_ptr<int8_t>(), hs.data_ptr<float>(), hsum.data_ptr<int>()};
+        int* i64p = ids64.data_ptr<int>();
+        QuantX kq{xp, (int)x.stride(0), xa, ids, i64p, np};
+        q.parallel_for(sycl::nd_range<1>(M * GU_G, GU_G), kq);
+        GateUpDec kg{ar, i64p, np, xa, ha};
+        q.parallel_for(sycl::nd_range<1>(size_t(np) * 9 * 16 * KS1, 16 * KS1), kg);
+        DownDec kd{ar, i64p, wts, np, ha, y.data_ptr<float>()};
+        q.parallel_for(sycl::nd_range<1>(size_t(np) * (DN_T / TW) * TW * KS2, TW * KS2), kd);
+    } else {
+        const int max_blk = (np + MB - 1) / MB + std::min(E, np);
+        auto rbuf = at::empty({2 * max_blk + max_blk * MB + 1}, i32);
+        int* rp = rbuf.data_ptr<int>();
+        Route rt{rp, rp + max_blk, rp + 2 * max_blk, rp + 2 * max_blk + max_blk * MB};   // blk_e, blk_n, slot, n_blk
+        auto hq = at::empty({(int64_t)max_blk * MB, INT}, i8);
+        auto hs = at::empty({(int64_t)max_blk * MB, DN_G}, f32), hsum = at::empty({(int64_t)max_blk * MB, DN_G}, i32);
+        Act ha{hq.data_ptr<int8_t>(), hs.data_ptr<float>(), hsum.data_ptr<int>()};
+        QuantX kq{xp, (int)x.stride(0), xa, ids, nullptr, np};
+        q.parallel_for(sycl::nd_range<1>(M * GU_G, GU_G), kq);
+        launch_align(q, ids, np, E, rt, max_blk * MB);
+        GateUpPre kg{ar, xa, rt, ha};
+        q.parallel_for(sycl::nd_range<1>(size_t(max_blk) * PARTS * PTH, PTH), kg);
+        DownPre kd{ar, ha, rt, wts, y.data_ptr<float>()};
+        q.parallel_for(sycl::nd_range<1>(size_t(max_blk) * PARTS * PTH, PTH), kd);
+    }
+    const int n = M * GU_G;
+    Combine kc{y.data_ptr<float>(), reinterpret_cast<uint16_t*>(out.data_ptr()), M, (int)out.stride(0)};
+    q.parallel_for(sycl::nd_range<1>((n + 7) / 8 * 8, 8), kc);
+    return out;
+}
+
+// Debug/validation: the int8 rotated activations exactly as the kernels compute them (q, scale, sum).
+std::vector<at::Tensor> quant_rows(at::Tensor x) {
+    TORCH_CHECK(x.is_xpu() && x.dim() == 2 && x.size(1) == HID && x.is_contiguous() && x.scalar_type() == at::kBFloat16);
+    const int M = x.size(0);
+    auto xq = at::empty({M, HID}, x.options().dtype(at::kChar));
+    auto xs = at::empty({M, GU_G}, x.options().dtype(at::kFloat)), xsum = at::empty({M, GU_G}, x.options().dtype(at::kInt));
+    if (M == 0) return {xq, xs, xsum};
+    Act xa{xq.data_ptr<int8_t>(), xs.data_ptr<float>(), xsum.data_ptr<int>()};
+    QuantX kq{reinterpret_cast<const uint16_t*>(x.data_ptr()), HID, xa, nullptr, nullptr, 0};
+    queue_of(x).parallel_for(sycl::nd_range<1>(M * GU_G, GU_G), kq);
+    return {xq, xs, xsum};
+}
+
+int64_t blob_bytes() { return (int64_t)BLOB; }
+
+}  // namespace iqr
+
+TORCH_LIBRARY(iqr_moe, m) {
+    m.def("moe_forward(Tensor x, Tensor topk_ids, Tensor topk_w, Tensor arena) -> Tensor");
+    m.impl("moe_forward", torch::kXPU, &iqr::moe_forward);
+    m.def("quant_rows(Tensor x) -> Tensor[]");
+    m.impl("quant_rows", torch::kXPU, &iqr::quant_rows);
+    m.def("blob_bytes() -> int", &iqr::blob_bytes);
+}
