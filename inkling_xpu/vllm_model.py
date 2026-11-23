@@ -70,8 +70,6 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         if self.want_dspark and spec.num_speculative_tokens not in (1, 3, 7) and not self.arbitrary_rows:
             raise ValueError("This DSpark width requires FP8 KV and both target XMX attention kernels")
         self.capture_rows = {1, spec.num_speculative_tokens + 1} if self.want_dspark else {1}
-        if os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1":
-            raise NotImplementedError("Adaptive DSpark is not ported to vLLM 0.34")
         variable_width = (os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1"
                           or os.environ.get("INKLING2_NGRAM_DRAFT", "0") == "1")
         if self.want_dspark and variable_width:

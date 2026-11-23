@@ -45,11 +45,9 @@ def register():
         "Inkling2B70ForConditionalGeneration", "inkling_xpu.vision:Inkling2B70ForConditionalGeneration"
     )
     register_speculative_method("inkling_dspark", "inkling_xpu.dspark_config.InklingDSparkSpeculatorConfig")
-    if os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1":
-        raise NotImplementedError("Adaptive DSpark is not ported to vLLM 0.34")
     if os.environ.get("INKLING2_RING_PREFIX", "0") == "1":
         from .ring_prefix import install
 
         install()
-    if os.environ.get("INKLING2_NGRAM_DRAFT", "0") == "1":
+    if "1" in (os.environ.get("INKLING2_NGRAM_DRAFT", "0"), os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0")):
         install_draft_prefix_handler()

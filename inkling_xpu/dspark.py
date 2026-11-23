@@ -346,8 +346,6 @@ class DraftSampling:
         self.cache = DraftLogitsCache(1, width, vocab, dtype=torch.float32, fill=-float("inf"), device=device)
         self.logits = self.cache.values
         self.adaptive = os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1"
-        if self.adaptive:
-            raise NotImplementedError("Adaptive DSpark is not ported to vLLM 0.34")
         self.confidence = [None] * width if self.adaptive else []
         self.temperature = torch.zeros(1, device=device)
         self.seed = torch.zeros(1, dtype=torch.int64, device=device)

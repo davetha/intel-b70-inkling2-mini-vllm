@@ -103,8 +103,9 @@ if [[ ${INKLING2_VISION:-0} == 1 ]]; then
 fi
 if [[ ${INKLING2_VLLM_DSPARK:-0} == 1 ]]; then
     # vLLM 0.34: DSpark is the registered speculative method "inkling_dspark"; no vLLM file overrides.
-    if [[ ${INKLING2_DSPARK_ADAPTIVE:-0} == 1 ]]; then
-        echo "Adaptive DSpark is not ported to vLLM 0.34" >&2
+    if [[ ${INKLING2_DSPARK_ADAPTIVE:-0} == 1 && ( ${INKLING2_RING_PREFIX:-0} != 1 ||
+          ${INKLING2_DSPARK_SAMPLING:-greedy} != probabilistic ) ]]; then
+        echo "Adaptive DSpark requires synchronous prefix reuse and probabilistic proposals" >&2
         exit 2
     fi
     ngram=${INKLING2_NGRAM_DRAFT:-0}
