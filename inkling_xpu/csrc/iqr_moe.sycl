@@ -22,6 +22,9 @@
 #include <sycl/ext/intel/esimd.hpp>
 #include <sycl/ext/intel/experimental/grf_size_properties.hpp>
 
+#include <cstdlib>
+#include <limits>
+
 using namespace sycl::ext::intel::esimd;
 namespace xmx = sycl::ext::intel::esimd::xmx;
 
@@ -119,7 +122,8 @@ ESIMD_INLINE void tile_gemm(const uint8_t* w, const uint16_t* ws, int g0, int ng
     }
 }
 
-// pairs routed to the expert of pair p (ids padded to 64 with -1); false if an earlier pair owns that expert
+// pairs routed to the expert of pair p (ids padded to 64 with -1); false if an earlier pair owns that expert.
+// cnt is the raw count: > 8 only with duplicate ids in a row (invalid routing); pairs[] keeps the first 8.
 ESIMD_INLINE bool group_pairs(const int* ids, int p, int np, simd<int, 8>& pairs, int& cnt) {
     simd<int, MAXP> id = block_load<int, MAXP>(ids);
     int e = id[p];
@@ -128,12 +132,20 @@ ESIMD_INLINE bool group_pairs(const int* ids, int p, int np, simd<int, 8>& pairs
     for (int q = 0; q < np; ++q) {
         if (id[q] == e) {
             if (q < p) return false;
-            pairs[cnt] = q;
+            if (cnt < 8) pairs[cnt] = q;
             ++cnt;
         }
     }
     for (int r = cnt; r < 8; ++r) pairs[r] = pairs[0];
     return true;
+}
+// invalid routing (expert id out of [0, E) or > 8 pairs on one expert): no weights are read and every pair routed to
+// that id gets NaN in y (16 columns per call), so bad ids fail loud downstream instead of reading past the arena
+ESIMD_INLINE bool bad_expert(int e, int E, int cnt) { return e < 0 || e >= E || cnt > 8; }
+ESIMD_INLINE void poison_pairs(const int* ids, int e, int np, float* y, int col) {
+    simd<int, MAXP> id = block_load<int, MAXP>(ids);
+    for (int q = 0; q < np; ++q)
+        if (id[q] == e) block_store<float, 16>(y + size_t(q) * HID + col, simd<float, 16>(std::numeric_limits<float>::quiet_NaN()));
 }
 
 struct Act {  // int8 rotated activations: q [rows][K], scale and code sum per (row, 128)
@@ -202,7 +214,7 @@ ESIMD_INLINE void gu_body(const uint8_t* ex, Act x, Act h, int blk, int t, int s
     }
 }
 struct GateUpDec {
-    const uint8_t* arena; const int* ids64; int np; Act x, h;
+    const uint8_t* arena; const int* ids64; int np, E; Act x, h;
     void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
         slm_init<DEC_SLM>();
         const int gid = it.get_group(0), p = gid / 9, blk = gid % 9, l = it.get_local_id(0), t = l % 16, s = l / 16;
@@ -210,6 +222,7 @@ struct GateUpDec {
         simd<int, 8> pairs; int cnt;
         if (!group_pairs(ids64, p, np, pairs, cnt)) return;
         simd<int, MAXP> id = block_load<int, MAXP>(ids64);
+        if (bad_expert(id[p], E, cnt)) return;
         const uint8_t* ex = arena + size_t(id[p]) * BLOB;
         if (cnt <= 1) gu_body<1>(ex, x, h, blk, t, s, l, pairs, cnt);
         else if (cnt <= 2) gu_body<2>(ex, x, h, blk, t, s, l, pairs, cnt);
@@ -243,7 +256,7 @@ ESIMD_INLINE void dn_body(const uint8_t* ex, const float* wts, Act h, float* y, 
     }
 }
 struct DownDec {
-    const uint8_t* arena; const int* ids64; const float* wts; int np; Act h; float* y;
+    const uint8_t* arena; const int* ids64; const float* wts; int np, E; Act h; float* y;
     void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
         slm_init<(KS2 > 1 ? (KS2 - 1) * TW * 8 * 64 : 64)>();
         constexpr int nch = DN_T / TW;
@@ -252,6 +265,10 @@ struct DownDec {
         simd<int, 8> pairs; int cnt;
         if (!group_pairs(ids64, p, np, pairs, cnt)) return;
         simd<int, MAXP> id = block_load<int, MAXP>(ids64);
+        if (bad_expert(id[p], E, cnt)) {
+            if (s == 0) poison_pairs(ids64, id[p], np, y, (chunk * TW + t) * 16);
+            return;
+        }
         const uint8_t* ex = arena + size_t(id[p]) * BLOB;
         if (cnt <= 1) dn_body<1>(ex, wts, h, y, chunk, t, s, pairs, cnt);
         else if (cnt <= 2) dn_body<2>(ex, wts, h, y, chunk, t, s, pairs, cnt);
@@ -291,17 +308,20 @@ static_assert(MB % 8 == 0 && PT % NT == 0 && (16 % NT) == 0, "prefill geometry")
 // Pairs sorted by expert into MB-row blocks: blk_e[b], blk_n[b] (rows), slot[b*MB + r] = pair index (-1 = padding).
 struct Route { int* blk_e; int* blk_n; int* slot; int* n_blk; };
 
-static void launch_align(sycl::queue& q, const int* ids, int np, int E, Route rt, int max_slots) {
+// Pairs with an expert id outside [0, E) are left out of every block and get NaN rows in y (fail loud, no OOB SLM).
+static void launch_align(sycl::queue& q, const int* ids, int np, int E, Route rt, float* y) {
     q.submit([&](sycl::handler& h) {
         sycl::local_accessor<int, 1> cnt(E, h), start(E, h), cur(E, h);
         h.parallel_for(sycl::nd_range<1>(1024, 1024), [=](sycl::nd_item<1> it) {
             const int l = it.get_local_id(0);
             for (int e = l; e < E; e += 1024) { cnt[e] = 0; cur[e] = 0; }
-            for (int i = l; i < max_slots; i += 1024) rt.slot[i] = -1;
             sycl::group_barrier(it.get_group());
-            for (int p = l; p < np; p += 1024)
-                sycl::atomic_ref<int, sycl::memory_order::relaxed, sycl::memory_scope::work_group,
-                                 sycl::access::address_space::local_space>(cnt[ids[p]]).fetch_add(1);
+            for (int p = l; p < np; p += 1024) {
+                const int e = ids[p];
+                if (e >= 0 && e < E)
+                    sycl::atomic_ref<int, sycl::memory_order::relaxed, sycl::memory_scope::work_group,
+                                     sycl::access::address_space::local_space>(cnt[e]).fetch_add(1);
+            }
             sycl::group_barrier(it.get_group());
             if (l == 0) {
                 int b = 0;
@@ -317,6 +337,10 @@ static void launch_align(sycl::queue& q, const int* ids, int np, int E, Route rt
             sycl::group_barrier(it.get_group());
             for (int p = l; p < np; p += 1024) {
                 const int e = ids[p];
+                if (e < 0 || e >= E) {
+                    for (int c = 0; c < HID; ++c) y[size_t(p) * HID + c] = std::numeric_limits<float>::quiet_NaN();
+                    continue;
+                }
                 const int r = sycl::atomic_ref<int, sycl::memory_order::relaxed, sycl::memory_scope::work_group,
                                                sycl::access::address_space::local_space>(cur[e]).fetch_add(1);
                 rt.slot[start[e] * MB + r] = p;
@@ -328,7 +352,7 @@ static void launch_align(sycl::queue& q, const int* ids, int np, int E, Route rt
 // SLM layout shared by both prefill GEMMs: A double buffer [2][MB/8][4][8 rows][8 dwords], then sa[G][MB], su[G][MB],
 // then the epilogue staging area.
 constexpr int SLM_A = 2 * MB * 128;
-template <int G> constexpr int slm_sa() { return SLM_A; }
+constexpr int slm_sa() { return SLM_A; }
 template <int G> constexpr int slm_su() { return SLM_A + G * MB * 4; }
 template <int G> constexpr int slm_ep() { return SLM_A + 2 * G * MB * 4; }
 ESIMD_INLINE int a_off(int buf, int rb, int d) { return ((buf * (MB / 8) + rb) * 4 + d) * 256; }
@@ -367,7 +391,7 @@ ESIMD_INLINE void block_group(const uint8_t* const* wc, const uint16_t* const* w
 #endif
 #pragma unroll IQR_RB_UNROLL
     for (int rb = 0; rb < MB / 8; ++rb) {
-        simd<float, 8> sa = slm_block_load<float, 8>(slm_sa<G>() + (g * MB + rb * 8) * 4);
+        simd<float, 8> sa = slm_block_load<float, 8>(slm_sa() + (g * MB + rb * 8) * 4);
         simd<int, 8> su = slm_block_load<int, 8>(slm_su<G>() + (g * MB + rb * 8) * 4);
         simd<int, NT * 128> ai = 0;
 #pragma unroll
@@ -399,7 +423,7 @@ ESIMD_INLINE void stage_scales(const float* as, const int* asum, const int* slot
         for (int g = 0; g < G; ++g) {
             float s = 0.f; int su = 0;
             if (r >= 0) { s = as[r * G + g]; su = asum[r * G + g]; }
-            slm_scalar_store<float>(slm_sa<G>() + (g * MB + m) * 4, s);
+            slm_scalar_store<float>(slm_sa() + (g * MB + m) * 4, s);
             slm_scalar_store<int>(slm_su<G>() + (g * MB + m) * 4, su);
         }
     }
@@ -518,6 +542,16 @@ at::Tensor moe_forward(at::Tensor x, at::Tensor topk_ids, at::Tensor topk_w, at:
     const int M = x.size(0), np = M * TOPK, E = arena.size(0);
     auto out = at::empty({M, HID}, x.options());
     if (M == 0) return out;
+    // Opt-in (INKLING2_IQR_CHECK_IDS=1) host-side routing check; it syncs, so eager only (fails under graph capture).
+    static const bool check_ids = [] { const char* v = std::getenv("INKLING2_IQR_CHECK_IDS"); return v && v[0] == '1'; }();
+    if (check_ids) {
+        TORCH_CHECK(queue_of(x).ext_oneapi_get_state() != sycl::ext::oneapi::experimental::queue_state::recording,
+                    "iqr_moe: INKLING2_IQR_CHECK_IDS=1 syncs on the host and cannot run under graph capture (run eager)");
+        auto s = std::get<0>(topk_ids.sort(1));
+        TORCH_CHECK(s.select(1, 0).ge(0).all().item<bool>() && s.select(1, TOPK - 1).lt(E).all().item<bool>(),
+                    "iqr_moe: expert id out of [0, ", E, ")");
+        TORCH_CHECK(!s.slice(1, 1).eq(s.slice(1, 0, TOPK - 1)).any().item<bool>(), "iqr_moe: duplicate expert id in a row");
+    }
     auto& q = queue_of(x);
     auto i32 = x.options().dtype(at::kInt), f32 = x.options().dtype(at::kFloat), i8 = x.options().dtype(at::kChar);
     auto xq = at::empty({M, HID}, i8);
@@ -536,9 +570,9 @@ at::Tensor moe_forward(at::Tensor x, at::Tensor topk_ids, at::Tensor topk_w, at:
         int* i64p = ids64.data_ptr<int>();
         QuantX kq{xp, (int)x.stride(0), xa, ids, i64p, np};
         q.parallel_for(sycl::nd_range<1>(M * GU_G, GU_G), kq);
-        GateUpDec kg{ar, i64p, np, xa, ha};
+        GateUpDec kg{ar, i64p, np, E, xa, ha};
         q.parallel_for(sycl::nd_range<1>(size_t(np) * 9 * 16 * KS1, 16 * KS1), kg);
-        DownDec kd{ar, i64p, wts, np, ha, y.data_ptr<float>()};
+        DownDec kd{ar, i64p, wts, np, E, ha, y.data_ptr<float>()};
         q.parallel_for(sycl::nd_range<1>(size_t(np) * (DN_T / TW) * TW * KS2, TW * KS2), kd);
     } else {
         const int max_blk = (np + MB - 1) / MB + std::min(E, np);
@@ -550,7 +584,7 @@ at::Tensor moe_forward(at::Tensor x, at::Tensor topk_ids, at::Tensor topk_w, at:
         Act ha{hq.data_ptr<int8_t>(), hs.data_ptr<float>(), hsum.data_ptr<int>()};
         QuantX kq{xp, (int)x.stride(0), xa, ids, nullptr, np};
         q.parallel_for(sycl::nd_range<1>(M * GU_G, GU_G), kq);
-        launch_align(q, ids, np, E, rt, max_blk * MB);
+        launch_align(q, ids, np, E, rt, y.data_ptr<float>());
         GateUpPre kg{ar, xa, rt, ha};
         q.parallel_for(sycl::nd_range<1>(size_t(max_blk) * PARTS * PTH, PTH), kg);
         DownPre kd{ar, ha, rt, wts, y.data_ptr<float>()};

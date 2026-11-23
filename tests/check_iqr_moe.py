@@ -3,7 +3,9 @@
 check: real layer weights (q file = gptq.py output or an iqr-layer-XX.safetensors) and real layer inputs (calib visit
   dump), real router. (1) kernel int8 activations == exact-arithmetic reference (bit-exact), (2) kernel output vs an
   fp64 reference of the same quantized arithmetic, for decode (M<=8) and prefill M, (3) decode vs prefill rows,
-  (4) vs the dense fake-quant (+a8, evalkl math) on the dense/<var> bf16 weights, (5) graph replay == eager.
+  (4) vs the dense fake-quant (+a8, evalkl math) on the dense/<var> bf16 weights, (5) graph replay == eager (decode
+  M=8, prefill M=9/16/48), (6) forced routing (all 8 rows on the same 8 experts: decode RC=8 branch), (7) invalid ids
+  -> NaN rows (or a RuntimeError with INKLING2_IQR_CHECK_IDS=1).
 bench: random arenas cycled past L2; IQR vs EXL3 (prod knobs: prefill_min 48, pair_max 8, tiny DPAS 4/9/18) for decode
   (graph-replayed 48-call sequences) and prefill M.
 usage: check_iqr_moe.py check --layer L --q FILE --dense FILE --x FILE [--shard NVFP4_SHARD]
@@ -11,6 +13,7 @@ usage: check_iqr_moe.py check --layer L --q FILE --dense FILE --x FILE [--shard 
 """
 import argparse
 import math
+import os
 import time
 
 import torch
@@ -160,7 +163,7 @@ def mode_check(a):
         ids, w = route(x, gw, gb)
         out = ops().moe_forward(x, ids, w, arena)
         torch.xpu.synchronize()
-        nref = min(M, a.ref_rows)
+        nref = M if M == a.ref_full else min(M, a.ref_rows)
         y = iqr_ref(x[:nref], ids[:nref].cpu(), w[:nref].cpu(), L)
         r = rel(out[:nref].float(), y)
         same = (out[:nref].cpu() == y.to(torch.bfloat16)).float().mean().item()
@@ -185,17 +188,60 @@ def mode_check(a):
             r = rel(out, dense_ref(x, ids.long(), w, d13, d2))
             print(f"M={M}: vs dense fake-quant +a8 (evalkl math): rel_l2 {r:.2e}")
             ok &= r < 2e-2
-    # (5) graph replay == eager
-    g = torch.xpu.XPUGraph()
-    xg = x8.clone(); ig = ids8.clone(); wg = w8.clone()
-    with torch.xpu.graph(g):
-        og = ops().moe_forward(xg, ig, wg, arena)
-    xg.copy_(xs_all[8:16]); i2, w2_ = route(xs_all[8:16].contiguous(), gw, gb); ig.copy_(i2); wg.copy_(w2_)
-    g.replay(); torch.xpu.synchronize()
-    oe = ops().moe_forward(xs_all[8:16].contiguous(), i2, w2_, arena)
-    same = torch.equal(og, oe)
-    print(f"graph replay (new inputs) == eager: {same}")
-    ok &= same
+    # (5) graph replay == eager: capture on rows [0, M), replay on rows [M, 2M); the id check syncs, so it refuses capture
+    strict = os.environ.get("INKLING2_IQR_CHECK_IDS") == "1"
+    for M in (() if strict else (8, 9, 16, 48)):
+        x1 = xs_all[:M].contiguous(); i1, w1 = route(x1, gw, gb)
+        g = torch.xpu.XPUGraph()
+        xg = x1.clone(); ig = i1.clone(); wg = w1.clone()
+        with torch.xpu.graph(g):
+            og = ops().moe_forward(xg, ig, wg, arena)
+        x2 = xs_all[M:2 * M].contiguous(); i2, w2_ = route(x2, gw, gb)
+        xg.copy_(x2); ig.copy_(i2); wg.copy_(w2_)
+        g.replay(); torch.xpu.synchronize()
+        oe = ops().moe_forward(x2, i2, w2_, arena)
+        same = torch.equal(og, oe)
+        print(f"graph replay M={M} (new inputs) == eager: {same}")
+        ok &= same
+    # (6) forced routing: every row on row 0's 8 experts (8 pairs per expert -> decode RC=8 branch)
+    xf = xs_all[:9].contiguous(); idf, wf = route(xf, gw, gb)
+    idf = idf[:1].expand(9, TOPK).contiguous()
+    od = ops().moe_forward(xf[:8].contiguous(), idf[:8].contiguous(), wf[:8].contiguous(), arena)
+    op9 = ops().moe_forward(xf, idf, wf, arena)
+    torch.xpu.synchronize()
+    r = rel(od.float(), iqr_ref(xf[:8], idf[:8].cpu(), wf[:8].cpu(), L))
+    r9 = rel(od.float(), op9[:8].float())
+    good = r < 3e-3 and r9 < 2e-3
+    print(f"forced routing (8 rows x same 8 experts): decode vs fp64 ref rel_l2 {r:.2e}, vs prefill M=9 rows {r9:.2e}  "
+          f"{'PASS' if good else 'FAIL'}")
+    ok &= good
+    if strict:
+        try:
+            with torch.xpu.graph(torch.xpu.XPUGraph()):
+                ops().moe_forward(x8, ids8, w8, arena)
+            good = False
+        except RuntimeError as ex:
+            good = "graph capture" in str(ex)
+        print(f"INKLING2_IQR_CHECK_IDS=1 refuses graph capture with a clear error: {good}")
+        ok &= good
+    # (7) invalid ids: out-of-range expert (decode, prefill) and > 8 pairs on one expert (decode) -> NaN rows only
+    for M, name in ((4, "range"), (16, "range"), (8, "dup")):
+        x1 = xs_all[:M].contiguous(); i1, w1 = route(x1, gw, gb)
+        i1 = i1.clone(); bad_rows = [1]
+        if name == "range":
+            i1[1, 3] = E
+        else:
+            e0 = int(i1[2, 0]); i1[1] = e0; bad_rows = sorted({1} | set((i1 == e0).any(1).nonzero().flatten().tolist()))
+        try:
+            o = ops().moe_forward(x1, i1, w1, arena); torch.xpu.synchronize()
+            nan = o.float().isnan().any(1).cpu()
+            good = not strict and nan.nonzero().flatten().tolist() == bad_rows
+            print(f"invalid ids ({name}, M={M}): NaN rows {nan.nonzero().flatten().tolist()} (expected {bad_rows})  "
+                  f"{'PASS' if good else 'FAIL'}")
+        except RuntimeError as ex:
+            good = strict
+            print(f"invalid ids ({name}, M={M}): raised {str(ex).splitlines()[0][:80]!r}  {'PASS' if good else 'FAIL'}")
+        ok &= good
     # determinism
     o1 = ops().moe_forward(xp, idsp, wp, arena); o2 = ops().moe_forward(xp, idsp, wp, arena)
     det = torch.equal(o1, o2) and torch.equal(o1, op)
@@ -286,6 +332,7 @@ if __name__ == "__main__":
     p.add_argument("--shard", default="/storage/inkling2/danmoreng-034/models/nvfp4-unc/model-00001-of-00001.safetensors")
     p.add_argument("--check-rows", type=int, nargs="+", default=[1, 2, 3, 4, 5, 8, 9, 16, 47, 300, 2048])
     p.add_argument("--ref-rows", type=int, default=12)
+    p.add_argument("--ref-full", type=int, default=47, help="check-rows size whose fp64 reference covers every row")
     p.add_argument("--rows", type=int, nargs="+", default=[1, 2, 4, 8, 48, 256, 2048, 4096])
     p.add_argument("--pool", type=int, default=0)
     p.add_argument("--layers", type=int, default=12)

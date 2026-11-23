@@ -11,6 +11,7 @@ model.llm.layers.L.mlp.experts.:
 At load time each layer is repacked on the device into the kernel's tiled arena [E, blob].
 """
 
+import json
 import os
 
 import torch
@@ -60,21 +61,44 @@ def pack_layer(w13_codes, w13_scales, w2_codes, w2_scales):
                       pack_scales(w2_scales)], 1)
 
 
+# The kernel hardcodes these model constants (iqr_moe.sycl HID/INT/TOPK and the activation's softcaps).
+KERNEL_CONFIG = {"hidden_size": 2304, "intermediate_size": 1152, "num_experts_per_tok": 8,
+                 "mlp_gate_softcap": 4.0, "mlp_up_softcap": 25.0}
+
+
+def check_config(checkpoint):
+    cfg = json.loads((checkpoint / "config.json").read_text())
+    cfg = cfg.get("text_config", cfg)
+    bad = {k: cfg.get(k) for k, v in KERNEL_CONFIG.items() if cfg.get(k) != v}
+    if bad:
+        raise ValueError(f"IQR experts: {checkpoint}/config.json {bad} does not match the iqr_moe kernel's {KERNEL_CONFIG}")
+
+
 class InklingIQRExperts:
     def __init__(self, checkpoint, layer, device, num_experts=128, chunk=16):
+        check_config(checkpoint)
         self.kernel = ops().moe_forward
         blob = ops().blob_bytes()
         self.arena = torch.empty((num_experts, blob), dtype=torch.uint8, device=device)
         p = f"model.llm.layers.{layer}.mlp.experts."
-        names = ("w13_codes", "w13_scales", "w2_codes", "w2_scales")
-        with safe_open(str(checkpoint / f"iqr-layer-{layer:02d}.safetensors"), framework="pt", device="cpu") as f:
-            if f.get_slice(p + "w13_codes").get_shape()[0] != num_experts:
-                raise ValueError(f"IQR layer {layer}: expert count mismatch")
+        H, I = KERNEL_CONFIG["hidden_size"], KERNEL_CONFIG["intermediate_size"]
+        spec = {"w13_codes": ("U8", [num_experts, 2 * I, H // 2]), "w13_scales": ("BF16", [num_experts, 2 * I, H // 128]),
+                "w2_codes": ("U8", [num_experts, H, I // 2]), "w2_scales": ("BF16", [num_experts, H, I // 128])}
+        path = checkpoint / f"iqr-layer-{layer:02d}.safetensors"
+        with safe_open(str(path), framework="pt", device="cpu") as f:
+            fmt = (f.metadata() or {}).get("format")
+            if fmt != "iqr-gptq4-v1":
+                raise ValueError(f"{path}: metadata format {fmt!r}, expected 'iqr-gptq4-v1'")
+            for n, (dt, shape) in spec.items():
+                sl = f.get_slice(p + n)
+                if sl.get_dtype() != dt or list(sl.get_shape()) != shape:
+                    raise ValueError(f"{path}: {p + n} is {sl.get_dtype()} {sl.get_shape()}, expected {dt} {shape}")
             for e0 in range(0, num_experts, chunk):
-                t = [f.get_slice(p + n)[e0:e0 + chunk].to(device) for n in names]
-                self.arena[e0:e0 + chunk].copy_(pack_layer(*t))
-        if self.arena.shape[1] != blob:
-            raise ValueError("IQR arena size mismatch")
+                t = [f.get_slice(p + n)[e0:e0 + chunk].to(device) for n in spec]
+                packed = pack_layer(*t)
+                if packed.shape != (t[0].shape[0], blob):
+                    raise ValueError(f"IQR layer {layer}: packed experts {tuple(packed.shape)}, kernel blob is {blob} bytes")
+                self.arena[e0:e0 + chunk].copy_(packed)
 
     def __call__(self, hidden, indices, routing):
         return self.kernel(hidden.to(torch.bfloat16).contiguous(), indices.to(torch.int32).contiguous(),
