@@ -475,6 +475,10 @@ class InklingDSparkSpeculator(BaseSpeculator):
             self.ng_ema = np.full(len(self.bucket_edges) + 1, float(self.width))
             self.ds_ema = float(self.dspark_steps) / 2
             self.rep_skips = 0
+            # YIELD_RESET=1 restarts the copy-yield estimates per request; above YIELD_MAXLEN context tokens the yield
+            # gate and adaptive depth are off (the DSpark block attends over the whole context there, so copies win).
+            self.yield_reset = os.environ.get("INKLING2_NGRAM_YIELD_RESET", "0") == "1"
+            self.yield_maxlen = int(os.environ.get("INKLING2_NGRAM_YIELD_MAXLEN", "0")) or 1 << 62
             self.nocopy = os.environ.get("INKLING2_NGRAM_NOCOPY", "0") == "1"
             if self.nocopy and os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1":
                 raise ValueError("INKLING2_NGRAM_NOCOPY needs fixed-width DSpark drafts (DSPARK_ADAPTIVE=0)")
@@ -568,6 +572,8 @@ class InklingDSparkSpeculator(BaseSpeculator):
             self.gate_req = input_batch.req_ids[0]
             self.gate_ema = float(self.width)
             self.last_round = None
+            if self.yield_reset:
+                self.ng_ema[:] = float(self.width)
             if self.trace is not None:
                 self.trace.write("req\n")
                 self.trace.flush()
@@ -607,7 +613,9 @@ class InklingDSparkSpeculator(BaseSpeculator):
             self.last_round = ("rep", match, self.dspark_steps, 0, None, length)
             return None
         bucket = int(np.searchsorted(self.bucket_edges, match, side="right"))
-        if match < self.gate_long:
+        if match < self.gate_long and length > self.yield_maxlen:
+            full = copied = copied[: self.short_depth]
+        elif match < self.gate_long:
             if self.gate and self.gate_ema < self.gate_accept:
                 self.last_round = ("skip", match, self.dspark_steps, 0, None, length)
                 return None
