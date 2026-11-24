@@ -28,6 +28,11 @@
 using namespace sycl::ext::intel::esimd;
 namespace xmx = sycl::ext::intel::esimd::xmx;
 
+#ifndef IQR_PART
+#define IQR_PART 0
+#endif
+// IQR_PART: 1 = host, decode, align, combine; 2 = prefill GEMMs (own TU, built with -ffp-contract=off so the unrolled
+// epilogue keeps separate fp32 mul/add as the non-unrolled kernel did; scripts/build-iqr-moe.sh); 0 = everything.
 namespace iqr {
 
 constexpr int HID = 2304, INT = 1152, TOPK = 8, MAXP = 64, BPG = 1024;
@@ -85,6 +90,7 @@ ESIMD_INLINE simd<uint32_t, 128> decode_chunk(const uint8_t* gp, int d) {
     return B;
 }
 
+#if IQR_PART != 2
 // ------------------------------------------------------------------ decode (M <= 8)
 // acc[RC x 16] += groups [g0, g0+ng) of one tile against RC activation rows (rows[r] = activation row index)
 template <int RC>
@@ -148,9 +154,11 @@ ESIMD_INLINE void poison_pairs(const int* ids, int e, int np, float* y, int col)
         if (id[q] == e) block_store<float, 16>(y + size_t(q) * HID + col, simd<float, 16>(std::numeric_limits<float>::quiet_NaN()));
 }
 
+#endif  // IQR_PART != 2
 struct Act {  // int8 rotated activations: q [rows][K], scale and code sum per (row, 128)
     int8_t* q; float* s; int* sum;
 };
+#if IQR_PART != 2
 
 // rotate + quantize the bf16 layer input (WG per row, 18 threads = one 128-block each); optionally pad the routing
 // ids to 64 entries (-1) for the decode kernels
@@ -293,6 +301,7 @@ struct Combine {
     }
 };
 
+#endif  // IQR_PART != 2
 // ------------------------------------------------------------------ prefill (M > 8)
 #ifndef IQR_MB
 #define IQR_MB 32
@@ -300,14 +309,18 @@ struct Combine {
 #ifndef IQR_NT
 #define IQR_NT 1
 #endif
-constexpr int MB = IQR_MB, NT = IQR_NT, PARTS = 3;
-constexpr int PT = GU_T / PARTS;        // tiles per partition (48)
+#ifndef IQR_PARTS
+#define IQR_PARTS 9
+#endif
+constexpr int MB = IQR_MB, NT = IQR_NT, PARTS = IQR_PARTS;
+constexpr int PT = GU_T / PARTS;        // tiles per partition (16)
 constexpr int PTH = PT / NT;            // threads per WG
-static_assert(MB % 8 == 0 && PT % NT == 0 && (16 % NT) == 0, "prefill geometry");
+static_assert(MB % 8 == 0 && GU_T % PARTS == 0 && PT % 16 == 0 && PT % NT == 0 && (16 % NT) == 0, "prefill geometry");
 
 // Pairs sorted by expert into MB-row blocks: blk_e[b], blk_n[b] (rows), slot[b*MB + r] = pair index (-1 = padding).
 struct Route { int* blk_e; int* blk_n; int* slot; int* n_blk; };
 
+#if IQR_PART != 2
 // Pairs with an expert id outside [0, E) are left out of every block and get NaN rows in y (fail loud, no OOB SLM).
 static void launch_align(sycl::queue& q, const int* ids, int np, int E, Route rt, float* y) {
     q.submit([&](sycl::handler& h) {
@@ -349,6 +362,8 @@ static void launch_align(sycl::queue& q, const int* ids, int np, int E, Route rt
     });
 }
 
+#endif  // IQR_PART != 2
+#if IQR_PART != 1
 // SLM layout shared by both prefill GEMMs: A double buffer [2][MB/8][4][8 rows][8 dwords], then sa[G][MB], su[G][MB],
 // then the epilogue staging area.
 constexpr int SLM_A = 2 * MB * 128;
@@ -387,7 +402,7 @@ ESIMD_INLINE void block_group(const uint8_t* const* wc, const uint16_t* const* w
         sw.template select<16, 1>(j * 16) = bf16x16(ws[j] + g * 16);
     }
 #ifndef IQR_RB_UNROLL
-#define IQR_RB_UNROLL 1
+#define IQR_RB_UNROLL 4
 #endif
 #pragma unroll IQR_RB_UNROLL
     for (int rb = 0; rb < MB / 8; ++rb) {
@@ -429,12 +444,9 @@ ESIMD_INLINE void stage_scales(const float* as, const int* asum, const int* slot
     }
 }
 
-// gate_up prefill: WG per (block b, partition of 48 tiles = 384 intermediates); writes h (rotated int8) per slot.
+// gate_up prefill: WG per (block b, partition of PT tiles = PT*8 intermediates); writes h (rotated int8) per slot.
 struct GateUpPre {
     const uint8_t* arena; Act x; Route rt; Act h;
-    auto get(sycl::ext::oneapi::experimental::properties_tag) const {
-        return sycl::ext::oneapi::experimental::properties{sycl::ext::intel::experimental::grf_size<256>};
-    }
     void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
         slm_init<slm_ep<GU_G>() + MB * 128 * 4>();
         const int t = it.get_local_id(0), T = PTH;
@@ -485,12 +497,9 @@ struct GateUpPre {
     }
 };
 
-// down prefill: WG per (block b, partition of 48 output tiles = 768 columns); y[pair] = w * acc (fp32).
+// down prefill: WG per (block b, partition of PT output tiles = PT*16 columns); y[pair] = w * acc (fp32).
 struct DownPre {
     const uint8_t* arena; Act h; Route rt; const float* wts; float* y;
-    auto get(sycl::ext::oneapi::experimental::properties_tag) const {
-        return sycl::ext::oneapi::experimental::properties{sycl::ext::intel::experimental::grf_size<256>};
-    }
     void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
         slm_init<slm_ep<DN_G>()>();
         const int t = it.get_local_id(0), T = PTH;
@@ -527,6 +536,16 @@ struct DownPre {
     }
 };
 
+// gate_up + down prefill GEMMs over the aligned blocks (this part is built with 256 GRF, see build-iqr-moe.sh)
+void prefill_gemms(sycl::queue& q, const uint8_t* ar, Act xa, Route rt, Act ha, const float* wts, float* y, int max_blk) {
+    GateUpPre kg{ar, xa, rt, ha};
+    q.parallel_for(sycl::nd_range<1>(size_t(max_blk) * PARTS * PTH, PTH), kg);
+    DownPre kd{ar, ha, rt, wts, y};
+    q.parallel_for(sycl::nd_range<1>(size_t(max_blk) * PARTS * PTH, PTH), kd);
+}
+#endif  // IQR_PART != 1
+#if IQR_PART != 2
+void prefill_gemms(sycl::queue& q, const uint8_t* ar, Act xa, Route rt, Act ha, const float* wts, float* y, int max_blk);
 // ------------------------------------------------------------------ host
 static sycl::queue& queue_of(const at::Tensor& t) { return c10::xpu::getCurrentXPUStream(t.device().index()).queue(); }
 
@@ -585,10 +604,7 @@ at::Tensor moe_forward(at::Tensor x, at::Tensor topk_ids, at::Tensor topk_w, at:
         QuantX kq{xp, (int)x.stride(0), xa, ids, nullptr, np};
         q.parallel_for(sycl::nd_range<1>(M * GU_G, GU_G), kq);
         launch_align(q, ids, np, E, rt, y.data_ptr<float>());
-        GateUpPre kg{ar, xa, rt, ha};
-        q.parallel_for(sycl::nd_range<1>(size_t(max_blk) * PARTS * PTH, PTH), kg);
-        DownPre kd{ar, ha, rt, wts, y.data_ptr<float>()};
-        q.parallel_for(sycl::nd_range<1>(size_t(max_blk) * PARTS * PTH, PTH), kd);
+        prefill_gemms(q, ar, xa, rt, ha, wts, y.data_ptr<float>(), max_blk);
     }
     const int n = M * GU_G;
     Combine kc{y.data_ptr<float>(), reinterpret_cast<uint16_t*>(out.data_ptr()), M, (int)out.stride(0)};
@@ -611,8 +627,10 @@ std::vector<at::Tensor> quant_rows(at::Tensor x) {
 
 int64_t blob_bytes() { return (int64_t)BLOB; }
 
+#endif  // IQR_PART != 2
 }  // namespace iqr
 
+#if IQR_PART != 2
 TORCH_LIBRARY(iqr_moe, m) {
     m.def("moe_forward(Tensor x, Tensor topk_ids, Tensor topk_w, Tensor arena) -> Tensor");
     m.impl("moe_forward", torch::kXPU, &iqr::moe_forward);
@@ -620,3 +638,4 @@ TORCH_LIBRARY(iqr_moe, m) {
     m.impl("quant_rows", torch::kXPU, &iqr::quant_rows);
     m.def("blob_bytes() -> int", &iqr::blob_bytes);
 }
+#endif

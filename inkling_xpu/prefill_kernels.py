@@ -1,5 +1,7 @@
 """Tiled prefill operations for the single-sequence Inkling adapter."""
 
+import os
+
 import torch
 import triton
 import triton.language as tl
@@ -125,7 +127,10 @@ def local_bias(r, projection):
     if (heads, width, extent) != (24, 16, 1024):
         raise ValueError("Unexpected Inkling local relative projection geometry")
     table = torch.empty((rows, heads, extent), device=r.device, dtype=torch.bfloat16)
-    _local_bias[(triton.cdiv(rows * heads, 32), extent // 64)](
+    # Tile (rows, cols, warps): every tile computes each element with the same three K=16 dots, so the table is bitwise
+    # identical for any tile; 64x256x8 writes it ~1.9x faster than 32x64x4 on the B70 (results/IQR-prefill-profile.md).
+    tr, tc, tw = _LOCAL_BIAS_TILE
+    _local_bias[(triton.cdiv(rows * heads, tr), extent // tc)](
         r.contiguous(),
         projection.contiguous(),
         table,
@@ -133,11 +138,14 @@ def local_bias(r, projection):
         heads,
         extent,
         width,
-        32,
-        64,
-        num_warps=4,
+        tr,
+        tc,
+        num_warps=tw,
     )
     return table
+
+
+_LOCAL_BIAS_TILE = tuple(int(v) for v in (os.environ.get("INKLING2_LOCAL_BIAS_TILE") or "32,64,4").split(","))
 
 
 @triton.jit
