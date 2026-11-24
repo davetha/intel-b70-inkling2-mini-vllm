@@ -23,6 +23,7 @@ def _mix(
     Scores,
     Inv,
     Out,
+    Out16,
     T,
     offset,
     stride_c,
@@ -34,6 +35,8 @@ def _mix(
     D: tl.constexpr,
     BD: tl.constexpr,
     NORMALIZE: tl.constexpr,
+    STORE32: tl.constexpr,
+    STORE16: tl.constexpr,
 ):
     row, query = tl.program_id(0), tl.program_id(1)
     d = tl.arange(0, BD)
@@ -62,7 +65,14 @@ def _mix(
     if NORMALIZE:
         y *= tl.rsqrt(tl.sum(y * y, 0) / D + 1e-6)
         y *= tl.load(Norm + query * stride_n + d, live, 0)
-    tl.store(Out + (query * T + row) * D + d, y, live)
+    if STORE32:
+        tl.store(Out + (query * T + row) * D + d, y, live)
+    if STORE16:
+        # Same RNE rounding as torch's .to(bfloat16) of the FP32 result; saves the separate cast in the consumer. The
+        # index is written so Triton sees 4-wide contiguity (as for the FP32 store): an 8-wide BF16 store changes the
+        # kernel's layout and with it the reduction order of every sum above (iqr/fuse/mixv.py).
+        d4 = (d // 4) * 4 + d % 4
+        tl.store(Out16 + (query * T + row) * D + d4, y.to(tl.bfloat16), d4 < D)
 
 
 class DepthQueries:
@@ -95,12 +105,15 @@ class DepthChunk:
         torch.mm(state, self.queries.weights.T, out=self.scores[slot])
         _inverse_norm[(rows,)](state, self.inv[slot], width, triton.next_power_of_2(width), num_warps=16)
 
-    def mix(self, bank, indices, current, queries, norm=None):
+    def mix(self, bank, indices, current, queries, norm=None, dtypes=(torch.float32,)):
+        """dtypes: output copies to return, (float32,), (bfloat16,) or (float32, bfloat16); one tensor per dtype."""
         if current.stride(-1) != 1:
             current = current.contiguous()
         rows, width = current.shape
         offset = self.queries.offsets[queries.data_ptr()]
-        out = torch.empty((len(queries), rows, width), device=current.device, dtype=torch.float32)
+        shape = (len(queries), rows, width)
+        out = torch.empty(shape, device=current.device, dtype=torch.float32) if torch.float32 in dtypes else None
+        out16 = torch.empty(shape, device=current.device, dtype=torch.bfloat16) if torch.bfloat16 in dtypes else None
         count = indices.numel()
         _mix[(rows, len(queries))](
             bank,
@@ -110,7 +123,8 @@ class DepthChunk:
             norm if norm is not None else current,
             self.scores,
             self.inv,
-            out,
+            out if out is not None else out16,
+            out16 if out16 is not None else out,
             rows,
             offset,
             current.stride(0),
@@ -122,7 +136,11 @@ class DepthChunk:
             width,
             triton.next_power_of_2(width),
             norm is not None,
+            out is not None,
+            out16 is not None,
             num_warps=16,
             enable_fp_fusion=False,
         )
-        return out
+        if len(dtypes) == 1:
+            return out if out is not None else out16
+        return tuple(out if t == torch.float32 else out16 for t in dtypes)

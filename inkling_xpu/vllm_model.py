@@ -50,6 +50,8 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self.prefill_local_bias = os.environ.get("INKLING2_PREFILL_LOCAL_BIAS", "0") == "table"
         self.prefill_kv_conv = os.environ.get("INKLING2_PREFILL_KV_CONV", "0") == "1"
         self.prefill_output_conv = os.environ.get("INKLING2_PREFILL_OUTPUT_CONV", "0") == "1"
+        # Bit-exact prefill glue fusion (BF16 copies from producers, residual adds in the output convs, gate+cast).
+        self.prefill_glue = os.environ.get("INKLING2_PREFILL_GLUE", "0") == "1"
         self.enable_ring_prefix = cache.enable_prefix_caching
         self.ring_high = self.saved_frontier = 0
         self.saved_rings = []
@@ -174,23 +176,31 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         return decode_paged(q, key_cache, value_cache, batch.block_table, batch.seq_lens, pos, rel, proj, sink,
                             queries_per_request=q.shape[0], num_splits=splits)
 
-    def _control_norm(self, il, module, cur, msg, weight):
+    def _control_norm(self, il, module, cur, msg, weight, dtypes=None):
         if self.prefill_controller and not self._static and cur.shape[0] > 8:
             down = self.lin[f"layers.{il}.controllers.{module}.down_weight"]
             up, _ = self.fused[il, "gf" + module]
             if down.w8a8 is None and up.w8a8 is None:
                 from .prefill_controller import controller
-                return controller(cur, msg, weight, down.w, up.w)
-        return super()._control_norm(il, module, cur, msg, weight)
+                return controller(cur, msg, weight, down.w, up.w, **({"dtypes": dtypes} if dtypes else {}))
+        out = super()._control_norm(il, module, cur, msg, weight)
+        if not dtypes:
+            return out
+        copies = tuple(out.to(t) for t in dtypes)
+        return copies[0] if len(copies) == 1 else copies
 
-    def _conv(self, vi, name, x, weight, dynamic, reqs, pos):
+    def _conv(self, vi, name, x, weight, dynamic, reqs, pos, residual=None):
         use_prefill_conv = self.prefill_output_conv if name in ("attn_out", "mlp_out") else self.prefill_kv_conv
         if use_prefill_conv and not self._static:
             from .prefill_kernels import prefill_conv
             slot, _, _, start = reqs[0]
             offset, _ = self.conv_ch[name]
-            return prefill_conv(x, weight, self.conv[vi, slot], self.conv_pos[slot], start, offset, dynamic)
-        return super()._conv(vi, name, x, weight, dynamic, reqs, pos)
+            fused = residual is not None and residual.dtype == torch.float32 and residual.is_contiguous() \
+                and residual.shape == x.shape
+            out = prefill_conv(x, weight, self.conv[vi, slot], self.conv_pos[slot], start, offset, dynamic,
+                               residual if fused else None)
+            return out if residual is None or fused else residual + out
+        return super()._conv(vi, name, x, weight, dynamic, reqs, pos, residual)
 
     def _prefill_global(self, visit, q, k, v, table, sink, reqs, batch):
         key_cache, value_cache = self._pages(visit, batch)

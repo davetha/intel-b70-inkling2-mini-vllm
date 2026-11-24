@@ -14,6 +14,7 @@ def _short_conv(
     Dynamic,
     History,
     Tags,
+    Res,
     Out,
     T,
     start,
@@ -26,6 +27,7 @@ def _short_conv(
     ROWS: tl.constexpr,
     COLS: tl.constexpr,
     HAS_DYNAMIC: tl.constexpr,
+    HAS_RES: tl.constexpr,
 ):
     row = tl.program_id(0) * ROWS + tl.arange(0, ROWS)
     col = tl.program_id(1) * COLS + tl.arange(0, COLS)
@@ -60,11 +62,17 @@ def _short_conv(
         result = (now + (acc + dyn_acc)) * (1.0 / 3.0)
     else:
         result = (now + acc) * (1.0 / 2.23606797749979)
+    if HAS_RES:
+        # The caller's residual add (residual + conv), fused; FP32 addition is commutative, so this is bit-exact.
+        result = tl.load(Res + row[:, None] * WIDTH + col[None, :], live, 0) + result
     tl.store(Out + row[:, None] * WIDTH + col[None, :], result, live)
 
 
-def prefill_conv(x, weight, history, tags, start, offset, dynamic=None):
+def prefill_conv(x, weight, history, tags, start, offset, dynamic=None, residual=None):
     rows, channels = x.shape
+    if residual is not None and (residual.dtype != torch.float32 or residual.shape != x.shape
+                                 or not residual.is_contiguous()):
+        raise ValueError("prefill_conv residual must be a contiguous FP32 tensor shaped like x")
     ring_size = history.shape[0]
     out = torch.empty((rows, channels), device=x.device, dtype=torch.float32)
     if x.stride(-1) != 1:
@@ -78,6 +86,7 @@ def prefill_conv(x, weight, history, tags, start, offset, dynamic=None):
         dynamic if dynamic is not None else x,
         history,
         tags,
+        residual if residual is not None else out,
         out,
         rows,
         start,
@@ -90,6 +99,7 @@ def prefill_conv(x, weight, history, tags, start, offset, dynamic=None):
         8,
         128,
         dynamic is not None,
+        residual is not None,
         num_warps=4,
         enable_fp_fusion=False,
     )
@@ -241,6 +251,26 @@ def prefill_prep(qrgs, k, v, pos, qscale, rscale, qlim, rlim, alpha, floor):
         num_warps=4,
     )
     return q, r, gate, sink, key, value
+
+
+@triton.jit
+def _gate_bf16(O, G, Out, N, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    live = i < N
+    o = tl.load(O + i, live, 0)
+    g = tl.load(G + i, live, 0)
+    tl.store(Out + i, (o * g).to(tl.bfloat16), live)
+
+
+def gate_bf16(o, gate):
+    """bf16(o * gate) in one pass: the attention output gate and the cast in front of the BF16 output projection."""
+    if o.dtype != torch.float32 or gate.dtype != torch.float32 or o.shape != gate.shape:
+        raise ValueError("gate_bf16 expects FP32 tensors of one shape")
+    o, gate = o.contiguous(), gate.contiguous()
+    out = torch.empty(o.shape, device=o.device, dtype=torch.bfloat16)
+    n = o.numel()
+    _gate_bf16[(triton.cdiv(n, 4096),)](o, gate, out, n, 4096, num_warps=16, enable_fp_fusion=False)
+    return out
 
 
 def bf16_prefill_linear(linear, x):

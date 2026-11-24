@@ -100,6 +100,8 @@ class InklingIQRExperts:
                     raise ValueError(f"IQR layer {layer}: packed experts {tuple(packed.shape)}, kernel blob is {blob} bytes")
                 self.arena[e0:e0 + chunk].copy_(packed)
 
+    bf16_input = True  # the kernel consumes BF16 activations, so the prefill glue may hand them over uncast
+
     def __call__(self, hidden, indices, routing):
         return self.kernel(hidden.to(torch.bfloat16).contiguous(), indices.to(torch.int32).contiguous(),
                            routing.float().contiguous(), self.arena)
