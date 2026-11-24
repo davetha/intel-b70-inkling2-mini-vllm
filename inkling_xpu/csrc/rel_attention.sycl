@@ -1,0 +1,311 @@
+// SPDX-License-Identifier: MIT
+// Inkling 2 prefill attention with the relative bias computed in the kernel: torch library `inkling2_rel`.
+// fa::Kern is the vendored trellis-serve prefill kernel (xpu/csrc/inkling2_ops.sycl, inkling2_xpu.prefill_attn) plus a
+// rel_bias mode; this library is built AOT for the B70 with the large register file (scripts/build-rel-attention.sh):
+// at 128 GRF the kernel spills (2.4 KB, 5.5 KB with rel_bias), at 256 GRF it does not, and the outputs are
+// bit-identical to the JIT-built inkling2_xpu kernel either way (iqr/fuse/xlib.py). Ops:
+//   prefill_attn      same contract as inkling2_xpu.prefill_attn (BF16 table [Lq, Hq, E])
+//   prefill_attn_rel  bias from rel [Lq, Hq, 16] and the packed FP16 high/low projection (prefill_kernels.packed_projection)
+#include <torch/all.h>
+#include <torch/library.h>
+#include <c10/xpu/XPUStream.h>
+#include <sycl/sycl.hpp>
+#include <sycl/ext/intel/esimd.hpp>
+#include <sycl/ext/intel/esimd/xmx/dpas.hpp>
+#include <sycl/ext/intel/experimental/esimd/memory.hpp>
+
+namespace inkling2_rel {
+static sycl::queue& queue_of(const at::Tensor& t) { return c10::xpu::getCurrentXPUStream(t.device().index()).queue(); }
+
+namespace fa {
+using namespace sycl::ext::intel::esimd;
+namespace xesimd = sycl::ext::intel::experimental::esimd;
+using fp16 = sycl::half;
+constexpr int QR = 8, KT = 16, KBT = 2, KB = KT * KBT;
+constexpr float LOG2E = 1.4426950408889634f, NEG = -1e30f;
+
+// rel_bias: the relative bias is computed in the kernel instead of gathered from a [Lq, Hq, E] BF16 table. Per key
+// block the 8x48 band of bias values the tile can touch is three DPAS column groups of r (FP16 high/low split) times the
+// projection (FP16 high/low split, packed [8 K-pairs][E] dwords with the distance axis reversed), in the operation order
+// of the Triton table kernel, then rounded to BF16 exactly as the table stores it (bit-identical o and lse).
+template <int D, bool split_block = false, bool rel_bias = false>
+struct Kern {
+    const fp16* q; const fp16* k; const fp16* v; float* o; float* lse;
+    const uint16_t* table; const float* sink;
+    int Lq, Lk, Hq, Hk, G, qpos0, kpos0, window, E, QTW;
+    float scale_log2;
+    const int32_t* block_start = nullptr;
+    int splits = 1, ring_capacity = 0, history_window = 0, prefix_tokens = 0;
+    const float* rel = nullptr; const uint32_t* proj_hi = nullptr; const uint32_t* proj_lo = nullptr;
+
+    void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+        constexpr int NC = D / 16;
+        // work-group = G heads x QTW adjacent query tiles of one kv head (they stream the same keys: L1 sharing)
+        int id = it.get_global_id(0);
+        int g = id % G, t1 = id / G, qti = t1 % QTW, t2 = t1 / QTW, kvh = t2 % Hk, qt = (t2 / Hk) * QTW + qti;
+        int part = 0, offset = 0, trim = 0, length = Lk, absolute_q = qpos0, absolute_k = kpos0;
+        if constexpr (split_block) {
+            // The draft's eight queries see the whole noise block. A doubled
+            // local ring exposes the wrapped history as one contiguous surface.
+            const int input_start = block_start[0];
+            const int max_start = ring_capacity ? 0x3fffffff : Lk - Lq;
+            const int start = input_start < 0 ? 0 : input_start > max_start ? max_start : input_start;
+            const int begin = history_window && start > history_window ? start - history_window : 0;
+            part = id / Hq;
+            qt = 0;
+            length = start - begin + Lq;
+            offset = ring_capacity ? begin % ring_capacity : 0;
+            if (!ring_capacity && history_window) {
+                trim = begin > prefix_tokens ? begin - prefix_tokens : 0;
+                length = start - trim + Lq;
+            }
+            absolute_q = length;
+            absolute_k = 0;
+        }
+        int q0 = qt * QR;
+        if (q0 >= Lq) return;
+        int h = kvh * G + g;
+        simd<fp16, NC * QR * 16> Qc = 0;
+#pragma unroll
+        for (int r = 0; r < QR; ++r) {
+            if (q0 + r < Lq) {
+                simd<fp16, D> row = block_load<fp16, D>(q + ((size_t)(q0 + r) * Hq + h) * D);
+#pragma unroll
+                for (int c = 0; c < NC; ++c) Qc.template select<16, 1>((c * QR + r) * 16) = row.template select<16, 1>(c * 16);
+            }
+        }
+        simd<fp16, QR * 16> Rh = 0, Rl = 0;
+        if constexpr (rel_bias) {
+#pragma unroll
+            for (int r = 0; r < QR; ++r) {
+                if (q0 + r < Lq) {
+                    simd<float, 16> rr = block_load<float, 16>(rel + ((size_t)(q0 + r) * Hq + h) * 16);
+                    simd<fp16, 16> hi = convert<fp16>(rr);
+                    Rh.template select<16, 1>(r * 16) = hi;
+                    Rl.template select<16, 1>(r * 16) = convert<fp16>(rr - convert<float>(hi));
+                }
+            }
+        }
+        simd<float, NC * QR * 16> O = 0.0f;
+        simd<float, QR> m, l;
+#pragma unroll
+        for (int r = 0; r < QR; ++r) {
+            const bool live = q0 + r < Lq;
+            m[r] = (sink && live) ? sink[(size_t)(q0 + r) * Hq + h] * LOG2E : NEG;
+            l[r] = (sink && live) ? 1.0f : 0.0f;
+        }
+        const int qmin = absolute_q + q0, qmax = absolute_q + (q0 + QR < Lq ? q0 + QR : Lq) - 1;
+        int hi = qmax - absolute_k + 1; if (hi > length) hi = length;
+        int lo = 0;
+        if (window > 0) { lo = qmin - window + 1 - absolute_k; if (lo < 0) lo = 0; }
+        lo = lo / KB * KB;
+        if constexpr (split_block) {
+            const int tiles_per_split = (length + splits * KB - 1) / (splits * KB);
+            lo = part * tiles_per_split * KB;
+            hi = length < lo + tiles_per_split * KB ? length : lo + tiles_per_split * KB;
+        }
+        const uint32_t* kb32 = reinterpret_cast<const uint32_t*>(k + ((size_t)offset * Hk + kvh) * D);
+        const fp16* vbase = v + ((size_t)offset * Hk + kvh) * D;
+        unsigned surfW = D * 2 - 1, surfH = (unsigned)(length + trim) - 1, pitch = (unsigned)Hk * D * 2 - 1;
+        simd<float, QR * 48> band;  // rel_bias: BF16-rounded bias for the tile's 8 rows x 48 distances
+        int band_next = -1;
+        for (int kb0 = lo; kb0 < hi; kb0 += KB) {
+            const int src_row = kb0 + (split_block && kb0 >= prefix_tokens ? trim : 0);
+            simd<float, KBT * QR * KT> S;
+#pragma unroll
+            for (int t = 0; t < KBT; ++t) {
+                simd<float, QR * KT> acc = 0.0f;
+#pragma unroll
+                for (int c = 0; c < NC; ++c) {
+                    simd<uint32_t, 8 * KT> kt = xesimd::lsc_load_2d<uint32_t, 8, KT, 1, true, false,
+                        xesimd::cache_hint::cached, xesimd::cache_hint::cached>(kb32, surfW, surfH, pitch, c * 8, src_row + t * KT);
+                    acc = xmx::dpas<8, 8, float, float, fp16, fp16>(acc, kt.template bit_cast_view<fp16>().read(),
+                        simd<fp16, QR * 16>(Qc.template select<QR * 16, 1>(c * QR * 16)));
+                }
+                S.template select<QR * KT, 1>(t * QR * KT) = acc * scale_log2;
+            }
+            const int kpmin = absolute_k + kb0, kpmax = absolute_k + kb0 + KB - 1;
+            const bool need_mask = (kb0 + KB > length) || (kpmax > qmin) || (window > 0 && qmax - kpmin >= window);
+            const bool need_bias = (rel_bias || table) && (qmin - kpmax < E);
+            if constexpr (rel_bias) {
+                if (need_bias) {
+                    // column c of the band = distance (largest distance of this tile) - c, packed index E - 1 - distance.
+                    // Consecutive key blocks shift the band by KB = 32 columns: the last group carries over as the first.
+                    const int x0 = E - 1 - ((absolute_q + q0 + QR - 1) - kpmin);
+                    const unsigned pw = (unsigned)E * 4 - 1;
+                    const int g_start = kb0 == band_next ? 1 : 0;
+                    if (g_start) {
+#pragma unroll
+                        for (int r = 0; r < QR; ++r) band.template select<16, 1>(r * 48) = band.template select<16, 1>(r * 48 + 32);
+                    }
+#pragma unroll
+                    for (int gc = 0; gc < 3; ++gc) {
+                        if (gc < g_start) continue;
+                        simd<uint32_t, 128> bh = xesimd::lsc_load_2d<uint32_t, 16, 8, 1, false, false,
+                            xesimd::cache_hint::cached, xesimd::cache_hint::cached>(proj_hi, pw, 7, pw, x0 + gc * 16, 0);
+                        simd<uint32_t, 128> bl = xesimd::lsc_load_2d<uint32_t, 16, 8, 1, false, false,
+                            xesimd::cache_hint::cached, xesimd::cache_hint::cached>(proj_lo, pw, 7, pw, x0 + gc * 16, 0);
+                        simd<fp16, 256> Bh = bh.template bit_cast_view<fp16>().read(), Bl = bl.template bit_cast_view<fp16>().read();
+                        // Triton's table kernel: bias = dot(rh, ph) + (dot(rl, ph) + dot(rh, pl)), with both adds folded
+                        // into DPAS accumulators (bit-identical to the table; iqr/fuse/abench.py orders 1/2).
+                        simd<float, QR * 16> t = 0.0f;
+                        t = xmx::dpas<8, 8, float, float, fp16, fp16>(t, Bh, Rl);
+                        t = xmx::dpas<8, 8, float, float, fp16, fp16>(t, Bl, Rh);
+                        t = xmx::dpas<8, 8, float, float, fp16, fp16>(t, Bh, Rh);
+                        // the table holds BF16 (round to nearest even)
+                        simd<uint32_t, QR * 16> u = t.template bit_cast_view<uint32_t>();
+                        u = (u + 0x7FFFu + ((u >> 16) & 1u)) & 0xFFFF0000u;
+                        t = u.template bit_cast_view<float>();
+#pragma unroll
+                        for (int r = 0; r < QR; ++r) band.template select<16, 1>(r * 48 + gc * 16) = t.template select<16, 1>(r * 16);
+                    }
+                    band_next = kb0 + KB;
+                }
+            }
+            if (need_mask || need_bias) {
+                simd<int, KT> lane(0, 1);
+#pragma unroll
+                for (int t = 0; t < KBT; ++t)
+#pragma unroll
+                    for (int r = 0; r < QR; ++r) {
+                        simd<int, KT> kj = lane + (kb0 + t * KT);
+                        simd<int, KT> dist = (absolute_q + q0 + r) - (kj + absolute_k);
+                        simd<float, KT> sv = S.template select<KT, 1>((t * QR + r) * KT);
+                        simd_mask<KT> bad = (kj >= length) | (dist < 0);
+                        if (window > 0) bad |= dist >= window;
+                        if (q0 + r >= Lq) bad = 1;
+                        if (need_bias) {
+                            simd_mask<KT> near = (dist < E) & !bad;
+                            simd<float, KT> bias;
+                            if constexpr (rel_bias) {
+                                bias = band.template select<KT, 1>(r * 48 + (QR - 1 - r) + t * KT);
+                            } else {
+                                simd<int, KT> dc = max(min(dist, simd<int, KT>(E - 1)), simd<int, KT>(0));
+                                simd<uint32_t, KT> off = simd<uint32_t, KT>(dc) * 2u + (uint32_t)((((size_t)(q0 + r < Lq ? q0 + r : 0) * Hq + h) * E) * 2);
+                                simd<uint16_t, KT> bb = gather<uint16_t, KT>(table, off, near);
+                                simd<uint32_t, KT> bw = simd<uint32_t, KT>(bb) << 16;
+                                bias = bw.template bit_cast_view<float>().read();
+                            }
+                            sv.merge(sv + bias * LOG2E, near);
+                        }
+                        sv.merge(simd<float, KT>(NEG), bad);
+                        S.template select<KT, 1>((t * QR + r) * KT) = sv;
+                    }
+            }
+            simd<float, QR> mb;
+#pragma unroll
+            for (int r = 0; r < QR; ++r) {
+                simd<float, KT> mx = S.template select<KT, 1>(r * KT);
+#pragma unroll
+                for (int t = 1; t < KBT; ++t) mx = max(mx, simd<float, KT>(S.template select<KT, 1>((t * QR + r) * KT)));
+                mb[r] = hmax<float>(mx);
+            }
+            simd<float, QR> m_new = max(m, mb);
+            simd<float, QR> alpha = exp2(m - m_new);
+            simd<float, QR * KT> mrep = m_new.template replicate_vs_w_hs<QR, 1, KT, 0>(0);
+            simd<float, QR> rs = 0.0f;
+            simd<fp16, KBT * QR * KT> P;
+#pragma unroll
+            for (int t = 0; t < KBT; ++t) {
+                simd<float, QR * KT> sp = S.template select<QR * KT, 1>(t * QR * KT);
+                simd<float, QR * KT> p = exp2(sp - mrep);
+                p.merge(simd<float, QR * KT>(0.0f), sp <= NEG * 0.5f);
+#pragma unroll
+                for (int r = 0; r < QR; ++r) rs[r] += reduce<float>(simd<float, KT>(p.template select<KT, 1>(r * KT)), std::plus<>());
+                P.template select<QR * KT, 1>(t * QR * KT) = convert<fp16>(p);
+            }
+            l = l * alpha + rs;
+            m = m_new;
+            simd<float, QR * 16> arep = alpha.template replicate_vs_w_hs<QR, 1, 16, 0>(0);
+#pragma unroll
+            for (int c = 0; c < NC; ++c) {
+                auto oc = O.template select<QR * 16, 1>(c * QR * 16);
+                simd<float, QR * 16> acc = simd<float, QR * 16>(oc) * arep;
+#pragma unroll
+                for (int t = 0; t < KBT; ++t) {
+                    simd<fp16, KT * 16> vt = xesimd::lsc_load_2d<fp16, 16, KT, 1, false, true,
+                        xesimd::cache_hint::cached, xesimd::cache_hint::cached>(vbase, surfW, surfH, pitch, c * 16, src_row + t * KT);
+                    acc = xmx::dpas<8, 8, float, float, fp16, fp16>(acc, vt, simd<fp16, QR * 16>(P.template select<QR * KT, 1>(t * QR * KT)));
+                }
+                oc = acc;
+            }
+        }
+        simd<float, QR> inv;
+#pragma unroll
+        for (int r = 0; r < QR; ++r) { float lr = l[r]; inv[r] = lr > 0.f ? 1.0f / lr : 0.f; }
+        simd<float, QR> normalizer;
+        if (lse) normalizer = (m + log2(l)) / LOG2E;
+#pragma unroll
+        for (int r = 0; r < QR; ++r) {
+            if (q0 + r >= Lq) break;
+            simd<float, D> row;
+            const float ir = inv[r];
+#pragma unroll
+            for (int c = 0; c < NC; ++c) row.template select<16, 1>(c * 16) = simd<float, 16>(O.template select<16, 1>((c * QR + r) * 16)) * ir;
+            const size_t row_index = ((size_t)part * Lq + q0 + r) * Hq + h;
+            block_store<float, D>(o + row_index * D, row);
+            if (lse) lse[row_index] = normalizer[r];
+        }
+    }
+};
+}  // namespace fa
+
+void prefill_attn(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor o, std::optional<at::Tensor> table, std::optional<at::Tensor> sink,
+                  int64_t qpos0, int64_t kpos0, int64_t window, int64_t qtw, std::optional<at::Tensor> lse) {
+    TORCH_CHECK(q.scalar_type() == at::kHalf && k.scalar_type() == at::kHalf && v.scalar_type() == at::kHalf && o.scalar_type() == at::kFloat);
+    TORCH_CHECK(q.is_contiguous() && k.is_contiguous() && v.is_contiguous() && o.is_contiguous() && q.size(2) == 128);
+    const int Lq = q.size(0), Hq = q.size(1), Lk = k.size(0), Hk = k.size(1);
+    TORCH_CHECK(!lse || (lse->device() == q.device() && lse->scalar_type() == at::kFloat &&
+                        lse->is_contiguous() && lse->dim() == 2 && lse->size(0) == Lq && lse->size(1) == Hq));
+    auto& qu = queue_of(q);
+    fa::Kern<128> kern{reinterpret_cast<const sycl::half*>(q.data_ptr()), reinterpret_cast<const sycl::half*>(k.data_ptr()),
+                       reinterpret_cast<const sycl::half*>(v.data_ptr()), o.data_ptr<float>(), lse ? lse->data_ptr<float>() : nullptr,
+                       table ? reinterpret_cast<const uint16_t*>(table->data_ptr()) : nullptr, sink ? sink->data_ptr<float>() : nullptr,
+                       Lq, Lk, Hq, Hk, Hq / Hk, (int)qpos0, (int)kpos0, (int)window, table ? (int)table->size(2) : 0, (int)qtw,
+                       (float)(fa::LOG2E / sycl::sqrt(128.0))};
+    const int qtiles = (Lq + fa::QR - 1) / fa::QR;
+    const int qgroups = (qtiles + qtw - 1) / qtw;
+    const size_t n = (size_t)qgroups * qtw * Hq;
+    const int wg = (Hq / Hk) * qtw;
+    qu.submit([&](sycl::handler& h) { h.parallel_for(sycl::nd_range<1>(n, wg), kern); });
+}
+
+// prefill_attn with the relative bias computed in the kernel (fa::Kern rel_bias): rel fp32 [Lq, Hq, 16], proj_hi/lo
+// int32 [8, E] = the FP16 high/low split of the [16, E] projection, K-pair packed, distance axis reversed.
+void prefill_attn_rel(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor o, at::Tensor rel, at::Tensor proj_hi,
+                      at::Tensor proj_lo, std::optional<at::Tensor> sink, int64_t qpos0, int64_t kpos0, int64_t window,
+                      int64_t qtw, std::optional<at::Tensor> lse) {
+    TORCH_CHECK(q.scalar_type() == at::kHalf && k.scalar_type() == at::kHalf && v.scalar_type() == at::kHalf && o.scalar_type() == at::kFloat);
+    TORCH_CHECK(q.is_contiguous() && k.is_contiguous() && v.is_contiguous() && o.is_contiguous() && q.size(2) == 128);
+    const int Lq = q.size(0), Hq = q.size(1), Lk = k.size(0), Hk = k.size(1);
+    TORCH_CHECK(rel.scalar_type() == at::kFloat && rel.is_contiguous() && rel.dim() == 3 && rel.size(0) == Lq &&
+                rel.size(1) == Hq && rel.size(2) == 16, "prefill_attn_rel: rel fp32 [Lq, Hq, 16]");
+    TORCH_CHECK(proj_hi.scalar_type() == at::kInt && proj_lo.scalar_type() == at::kInt && proj_hi.is_contiguous() &&
+                proj_lo.is_contiguous() && proj_hi.dim() == 2 && proj_hi.size(0) == 8 && proj_hi.sizes() == proj_lo.sizes() &&
+                proj_hi.size(1) % 16 == 0 && proj_hi.size(1) >= 16, "prefill_attn_rel: packed projection int32 [8, E]");
+    TORCH_CHECK(!lse || (lse->device() == q.device() && lse->scalar_type() == at::kFloat &&
+                        lse->is_contiguous() && lse->dim() == 2 && lse->size(0) == Lq && lse->size(1) == Hq));
+    auto& qu = queue_of(q);
+    fa::Kern<128, false, true> kern{reinterpret_cast<const sycl::half*>(q.data_ptr()), reinterpret_cast<const sycl::half*>(k.data_ptr()),
+                       reinterpret_cast<const sycl::half*>(v.data_ptr()), o.data_ptr<float>(), lse ? lse->data_ptr<float>() : nullptr,
+                       nullptr, sink ? sink->data_ptr<float>() : nullptr,
+                       Lq, Lk, Hq, Hk, Hq / Hk, (int)qpos0, (int)kpos0, (int)window, (int)proj_hi.size(1), (int)qtw,
+                       (float)(fa::LOG2E / sycl::sqrt(128.0))};
+    kern.rel = rel.data_ptr<float>();
+    kern.proj_hi = reinterpret_cast<const uint32_t*>(proj_hi.data_ptr());
+    kern.proj_lo = reinterpret_cast<const uint32_t*>(proj_lo.data_ptr());
+    const int qtiles = (Lq + fa::QR - 1) / fa::QR;
+    const int qgroups = (qtiles + qtw - 1) / qtw;
+    const size_t n = (size_t)qgroups * qtw * Hq;
+    const int wg = (Hq / Hk) * qtw;
+    qu.submit([&](sycl::handler& h) { h.parallel_for(sycl::nd_range<1>(n, wg), kern); });
+}
+
+}  // namespace inkling2_rel
+
+TORCH_LIBRARY(inkling2_rel, m) {
+    m.def("prefill_attn(Tensor q, Tensor k, Tensor v, Tensor(a!) o, Tensor? table, Tensor? sink, int qpos0, int kpos0, int window, int qtw=1, Tensor(b!)? lse=None) -> ()");
+    m.impl("prefill_attn", torch::kXPU, &inkling2_rel::prefill_attn);
+    m.def("prefill_attn_rel(Tensor q, Tensor k, Tensor v, Tensor(a!) o, Tensor rel, Tensor proj_hi, Tensor proj_lo, Tensor? sink, int qpos0, int kpos0, int window, int qtw=1, Tensor(b!)? lse=None) -> ()");
+    m.impl("prefill_attn_rel", torch::kXPU, &inkling2_rel::prefill_attn_rel);
+}

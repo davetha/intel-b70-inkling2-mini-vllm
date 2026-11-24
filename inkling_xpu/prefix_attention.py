@@ -15,6 +15,7 @@ def hybrid_prefill(
     read_kv: Callable[[int, int], tuple[torch.Tensor, torch.Tensor]],
     *, split_alignment: int | None = None,
     read_heads: Callable[[int, int], tuple[torch.Tensor, torch.Tensor]] | None = None,
+    prefill_attn: Callable[..., None] | None = None,
 ) -> torch.Tensor:
     # Every query can see these older keys and none receives relative bias.
     far_end = max(0, first_position + 1 - table.shape[-1])
@@ -24,7 +25,7 @@ def hybrid_prefill(
     k, v = read_kv(prefix_end, total_tokens)
     out = torch.empty_like(q_half, dtype=torch.float32)
     lse = torch.empty(q.shape[:2], dtype=torch.float32, device=q.device)
-    torch.ops.inkling2_xpu.prefill_attn(
+    (prefill_attn or torch.ops.inkling2_xpu.prefill_attn)(
         q_half, k.to(torch.float16).contiguous(), v.to(torch.float16).contiguous(), out,
         table.to(torch.bfloat16).contiguous(), sink.float().contiguous(),
         first_position, prefix_end, 0, 4, lse,

@@ -52,6 +52,10 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self.prefill_output_conv = os.environ.get("INKLING2_PREFILL_OUTPUT_CONV", "0") == "1"
         # Bit-exact prefill glue fusion (BF16 copies from producers, residual adds in the output convs, gate+cast).
         self.prefill_glue = os.environ.get("INKLING2_PREFILL_GLUE", "0") == "1"
+        # Local-layer relative bias inside the prefill attention kernel (needs an INKLING2_LIB with prefill_attn_rel).
+        self.prefill_rel_bias = os.environ.get("INKLING2_PREFILL_REL_BIAS", "0") == "1"
+        # Global layers: one-pass BF16 bias table and the 256-GRF table attention (both bit-identical).
+        self.prefill_global_table = os.environ.get("INKLING2_PREFILL_GLOBAL_TABLE", "0") == "1"
         self.enable_ring_prefix = cache.enable_prefix_caching
         self.ring_high = self.saved_frontier = 0
         self.saved_rings = []
@@ -225,11 +229,18 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             if self.prefill_prefix_io and not self.packed_kv:
                 from .prefix_io import read_heads as gather_heads
                 read_heads = partial(gather_heads, key_cache, value_cache, batch.block_table[0])
+            attn = None
+            if self.prefill_global_table:
+                from .prefill_kernels import rel_ops
+                attn = rel_ops().prefill_attn
             return [hybrid_prefill(q, table, sink, batch.first_position, batch.total_tokens,
                                    self.prefix_block, read_kv, split_alignment=self.page_tokens if self.tight_prefix else None,
-                                   read_heads=read_heads)]
+                                   read_heads=read_heads, prefill_attn=attn)]
         else:
             keys, values = read_kv(0, batch.total_tokens)
+        if self.prefill_global_table:
+            from .prefill_kernels import attention_prefill_table
+            return [attention_prefill_table(q, keys, values, batch.first_position, 0, table, sink, qtw=4)]
         return [attention_prefill_esimd(q, keys, values, batch.first_position, 0, table, sink, qtw=4)]
 
     def _metadata(self, size, device):
