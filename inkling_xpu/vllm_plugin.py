@@ -22,14 +22,27 @@ def install_draft_prefix_handler():
         def __init__(self, batch):
             self.req_ids = batch.req_ids
 
+    # INKLING2_NGRAM_NOCOPY=1: the speculator knows each draft's valid width on the host, so hand the scheduler
+    # width-only placeholders (as vLLM does for fixed-width drafts) instead of syncing on a device-to-host copy that
+    # waits for the draft block; the verify step reads the real draft tokens on the device either way.
+    nocopy = os.environ.get("INKLING2_NGRAM_NOCOPY", "0") == "1"
+
     def set_draft_tokens(self, input_batch, draft_tokens):
+        if nocopy and not input_batch.has_structured_output_reqs:
+            from .dspark import DRAFT_WIDTHS
+
+            for req_id in input_batch.req_ids:
+                self._draft_tokens_by_req[req_id] = DRAFT_WIDTHS.get(req_id, draft_tokens.shape[1])
+            return
         set_tokens(self, AlwaysCopy(input_batch), draft_tokens)
 
     def get_draft_tokens(self):
+        widths = {r for r, v in self._draft_tokens_by_req.items() if isinstance(v, int)}
         drafts = get_tokens(self)
         if drafts is None:
             return None
-        return DraftTokenIds(drafts.req_ids, [[t for t in row if t >= 0] for row in drafts.draft_token_ids])
+        rows = [row if r in widths else [t for t in row if t >= 0] for r, row in zip(drafts.req_ids, drafts.draft_token_ids)]
+        return DraftTokenIds(drafts.req_ids, rows)
 
     DraftTokensHandler.set_draft_tokens = set_draft_tokens
     DraftTokensHandler.get_draft_tokens = get_draft_tokens

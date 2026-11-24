@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 
 import numpy as np
 import torch
@@ -17,6 +18,8 @@ from vllm.v1.worker.gpu.spec_decode.speculator import BaseSpeculator
 # vLLM 0.34 has no runner hook to hand a custom speculator the target model,
 # so the Inkling model binds itself here once its draft is built.
 _TARGET = None
+# Valid draft width per request from the latest propose (INKLING2_NGRAM_NOCOPY; read by the plugin's draft handler).
+DRAFT_WIDTHS = {}
 
 
 def bind_target(model):
@@ -454,6 +457,32 @@ class InklingDSparkSpeculator(BaseSpeculator):
             self.last_round = None
             trace = os.environ.get("INKLING2_NGRAM_TRACE")
             self.trace = open(trace, "a", buffering=1 << 16) if trace else None
+            # INKLING2_NGRAM_YIELD=1: copy a match shorter than GATE_LONG only when its expected accepted tokens
+            # (EMA per match-length bucket; skipped rounds are scored against the tokens actually emitted) times
+            # YIELD_COST... beats DSpark's accepted EMA. ADAPT_DEPTH trims short copies to about the expected yield.
+            self.yield_gate = os.environ.get("INKLING2_NGRAM_YIELD", "0") == "1"
+            self.yield_cost = float(os.environ.get("INKLING2_NGRAM_YIELD_COST", "1.0"))
+            self.yield_decay = float(os.environ.get("INKLING2_NGRAM_YIELD_DECAY", "0.7"))
+            self.adapt_depth = os.environ.get("INKLING2_NGRAM_ADAPT_DEPTH", "0") == "1"
+            self.min_depth = int(os.environ.get("INKLING2_NGRAM_MIN_DEPTH", "3"))
+            # INKLING2_NGRAM_REP_GUARD=R: no copy while the tail is a cycle of period <= REP_PERIOD repeated R times.
+            self.rep_guard = int(os.environ.get("INKLING2_NGRAM_REP_GUARD", "0"))
+            self.rep_period = int(os.environ.get("INKLING2_NGRAM_REP_PERIOD", "32"))
+            if (not 0 <= self.yield_decay < 1 or not 1 <= self.min_depth <= self.width or self.rep_guard < 0
+                    or self.rep_period < 1):
+                raise ValueError("Invalid n-gram yield/depth/repetition settings")
+            self.bucket_edges = np.array([4, 6, 8, 12, 16, 32])
+            self.ng_ema = np.full(len(self.bucket_edges) + 1, float(self.width))
+            self.ds_ema = float(self.dspark_steps) / 2
+            self.rep_skips = 0
+            self.nocopy = os.environ.get("INKLING2_NGRAM_NOCOPY", "0") == "1"
+            if self.nocopy and os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1":
+                raise ValueError("INKLING2_NGRAM_NOCOPY needs fixed-width DSpark drafts (DSPARK_ADAPTIVE=0)")
+        # INKLING2_NGRAM_PROF=path: per-call CPU timings of propose (sync, lookup, total), flushed every 2000 calls.
+        prof = os.environ.get("INKLING2_NGRAM_PROF")
+        self.prof = open(prof, "a", buffering=1) if prof else None
+        self.prof_acc = np.zeros(4)
+        self.prof_sync = os.environ.get("INKLING2_PROF_SYNC", "0") == "1"
 
     @property
     def target(self):
@@ -496,8 +525,26 @@ class InklingDSparkSpeculator(BaseSpeculator):
             start = input_batch.seq_lens[:1].int() - num_rejected[:1].int()
         else:
             start = upper - int(num_rejected[0].item())
+        if self.prof_sync:
+            int(num_sampled[0].item())
         if self.ngram_max:
-            copied = self.ngram_propose(input_batch, num_sampled)
+            if self.prof is not None:
+                t0 = time.perf_counter()
+                copied = self.ngram_propose(input_batch, num_sampled)
+                self.prof_acc[2] += time.perf_counter() - t0
+                self.prof_acc[3] += 1
+                if self.prof_acc[3] == 2000:
+                    a = self.prof_acc
+                    self.prof.write(f"calls {int(a[3])} sync_us {1e6*a[0]/a[3]:.0f} lookup_us {1e6*a[1]/a[3]:.0f} "
+                                    f"ngram_propose_us {1e6*a[2]/a[3]:.0f} ngram_rounds {self.ngram_rounds} "
+                                    f"rep_skips {self.rep_skips} ds_ema {self.ds_ema:.2f} "
+                                    f"ng_ema {' '.join(f'{x:.2f}' for x in self.ng_ema)}\n")
+                    self.prof_acc[:] = 0
+            else:
+                copied = self.ngram_propose(input_batch, num_sampled)
+            if self.nocopy:
+                DRAFT_WIDTHS.clear()
+                DRAFT_WIDTHS[input_batch.req_ids[0]] = self.dspark_steps if copied is None else self.last_round[2]
             if copied is not None:
                 return copied
         anchor = last_sampled[input_batch.idx_mapping[:1]].reshape(1).long()
@@ -511,9 +558,12 @@ class InklingDSparkSpeculator(BaseSpeculator):
         # The target forward stores draft KV and f_ring for every verified row,
         # so a round without the DSpark block leaves the next block's inputs intact.
         req = int(input_batch.idx_mapping_np[0])
+        t0 = time.perf_counter() if self.prof is not None else 0.0
         length, sampled = torch.stack(
             [self.req_states.total_len.gpu[req].long(), num_sampled[0].long()]
         ).tolist()
+        if self.prof is not None:
+            self.prof_acc[0] += time.perf_counter() - t0
         if input_batch.req_ids[0] != self.gate_req:
             self.gate_req = input_batch.req_ids[0]
             self.gate_ema = float(self.width)
@@ -521,30 +571,58 @@ class InklingDSparkSpeculator(BaseSpeculator):
             if self.trace is not None:
                 self.trace.write("req\n")
                 self.trace.flush()
-        if self.last_round is not None and sampled > 0:
-            kind, match, count = self.last_round
-            accepted = min(sampled - 1, count)
-            if kind == "ngram":
-                self.gate_ema = self.gate_decay * self.gate_ema + (1 - self.gate_decay) * accepted
-            if self.trace is not None:
-                self.trace.write(f"{kind} {match} {count} {accepted}\n")
-        self.last_round = ("dspark", 0, self.dspark_steps)
-        if sampled <= 0 or length <= self.ngram_min:
-            return None
         history = getattr(self.req_states.all_token_ids, "_uva_buf", None)
         if history is not None:
             tokens = history.np[req, :length]
         else:
             tokens = self.req_states.all_token_ids.gpu[req, :length].cpu().numpy()
+        if self.last_round is not None and sampled > 0:
+            kind, match, count, bucket, guess, start = self.last_round
+            accepted = min(sampled - 1, count)
+            if kind == "ngram":
+                self.gate_ema = self.gate_decay * self.gate_ema + (1 - self.gate_decay) * accepted
+            else:
+                self.ds_ema = self.yield_decay * self.ds_ema + (1 - self.yield_decay) * accepted
+            if guess is not None and start + sampled <= length:
+                # Score the full copy against the emitted tokens; a copy that agreed with everything we can see
+                # (or was cut by the verify width) is scored optimistically as fully accepted.
+                emitted = tokens[start : start + sampled]
+                k = min(len(guess), sampled)
+                agree = int(np.argmin(np.append(emitted[:k] == np.asarray(guess[:k]), False)))
+                score = len(guess) if agree >= min(k, count if kind == "ngram" else k) else agree
+                self.ng_ema[bucket] = self.yield_decay * self.ng_ema[bucket] + (1 - self.yield_decay) * score
+            if self.trace is not None:
+                self.trace.write(f"{kind} {match} {count} {accepted}\n")
+        self.last_round = ("dspark", 0, self.dspark_steps, 0, None, length)
+        if sampled <= 0 or length <= self.ngram_min:
+            return None
+        t1 = time.perf_counter() if self.prof is not None else 0.0
         copied, match = ngram_continuation(tokens, self.ngram_min, self.ngram_max, self.width, with_length=True)
+        if self.prof is not None:
+            self.prof_acc[1] += time.perf_counter() - t1
         if copied is None:
             return None
+        if self.rep_guard and self.repeating(tokens):
+            self.rep_skips += 1
+            self.last_round = ("rep", match, self.dspark_steps, 0, None, length)
+            return None
+        bucket = int(np.searchsorted(self.bucket_edges, match, side="right"))
         if match < self.gate_long:
             if self.gate and self.gate_ema < self.gate_accept:
-                self.last_round = ("skip", match, self.dspark_steps)
+                self.last_round = ("skip", match, self.dspark_steps, 0, None, length)
                 return None
-            copied = copied[: self.short_depth]
-        self.last_round = ("ngram", match, len(copied))
+            if self.yield_gate and 1 + self.ng_ema[bucket] < (1 + self.ds_ema) * self.yield_cost:
+                self.last_round = ("skip", match, self.dspark_steps, bucket, copied, length)
+                return None
+            depth = self.short_depth
+            if self.adapt_depth:
+                depth = min(depth, max(self.min_depth, int(np.ceil(self.ng_ema[bucket])) + 1))
+            full, copied = copied, copied[:depth]
+        else:
+            full = copied
+        if not (self.yield_gate or self.adapt_depth):
+            full = None
+        self.last_round = ("ngram", match, len(copied), bucket, full, length)
         self.ngram_rounds += 1
         count = len(copied)
         row = torch.tensor(
@@ -556,3 +634,14 @@ class InklingDSparkSpeculator(BaseSpeculator):
             logits.fill_(-float("inf"))
             logits.scatter_(1, row[0, :count, None], 0.0)
         return row
+
+    def repeating(self, tokens):
+        """True when the tail is one cycle of period <= rep_period repeated rep_guard times (degenerate loop)."""
+        n = len(tokens)
+        for p in range(1, self.rep_period + 1):
+            span = p * (self.rep_guard - 1)
+            if n < span + p:
+                break
+            if np.array_equal(tokens[n - span :], tokens[n - span - p : n - p]):
+                return True
+        return False
