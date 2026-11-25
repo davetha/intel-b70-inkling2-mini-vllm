@@ -1,0 +1,425 @@
+// SPDX-License-Identifier: MIT
+// Inkling 2 decode attention (FP8 paged global, BF16 SWA ring, DSpark draft global): torch library `inkling2_dxmx`.
+// Verbatim copy of the vendored trellis-serve kernels (xpu/csrc/inkling2_ops.sycl fa::PagedXmx and the inkling2_xpu ops
+// paged_xmx, draft_global_xmx, local_xmx), built AOT for the B70 with the large register file
+// (scripts/build-decode-xmx.sh): the JIT 128-GRF build spills (256 B global, 1.8-2.6 KB local, 0.2-1.1 KB draft), the
+// 256-GRF build does not, and the outputs are bit-identical (iqr/fuse/dxbench.py). Selected by INKLING2_DECODE_XMX256=1.
+#include <torch/all.h>
+#include <torch/library.h>
+#include <c10/xpu/XPUStream.h>
+#include <sycl/sycl.hpp>
+#include <sycl/ext/intel/esimd.hpp>
+#include <sycl/ext/intel/esimd/xmx/dpas.hpp>
+#include <sycl/ext/intel/experimental/esimd/memory.hpp>
+
+namespace inkling2_dxmx {
+static sycl::queue& queue_of(const at::Tensor& t) { return c10::xpu::getCurrentXPUStream(t.device().index()).queue(); }
+
+namespace fa {
+using namespace sycl::ext::intel::esimd;
+namespace xesimd = sycl::ext::intel::experimental::esimd;
+using fp16 = sycl::half;
+constexpr float LOG2E = 1.4426950408889634f, NEG = -1e30f;
+
+// Eight query rows (including GQA heads) share one FP8 cache tile. The
+// allocator stores keys and values in two halves of a physical vLLM page.
+template <int N> ESIMD_INLINE simd<fp16, N> from_e4m3(simd<uint8_t, N> bytes) {
+    // E4M3 and binary16 have the same significand after a seven-bit
+    // left shift. Multiplication by 256 adjusts their exponent bias, including subnormals.
+    simd<uint16_t, N> u = convert<uint16_t>(bytes);
+    simd<uint16_t, N> bits = ((u & 127) << 7) | ((u & 128) << 8);
+    return bits.template bit_cast_view<fp16>().read() * fp16(256.f);
+}
+
+template <int M, bool Local = false, bool Draft = false> struct PagedXmx {
+    const fp16 *q;
+    const uint8_t *k, *v;
+    const int *pages, *length, *positions;
+    const float *table, *sink;
+    float *output, *lse;
+    int splits, page_size, block_stride, token_stride, head_stride, extent;
+    bool packed = false;
+
+    void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+        constexpr int R = 3 * M, tiles = (R + 7) / 8;
+        int id = it.get_global_id(0);
+        const int tile = id % tiles, hk = (id / tiles) % 8, part = id / (tiles * 8);
+        int start = positions[0], L = Draft ? start + M : length[0];
+        const int lo = Local && start >= 1024 ? (start - 1023) / 16 : 0;
+        const int chunks = (L + 15) / 16, per = (chunks - lo + splits - 1) / splits;
+        const int first = lo + part * per, last = (chunks < first + per ? chunks : first + per);
+        simd<fp16, 1024> Q = 0;
+        simd<float, 1024> O = 0;
+        simd<float, 8> m = NEG, total = 0.f;
+#pragma unroll
+        for (int row = 0; row < 8; ++row) {
+            int r = tile * 8 + row;
+            if (r < R) {
+                int qh = (r / 3) * 24 + hk * 3 + r % 3;
+                auto qr = block_load<fp16, 128>(q + qh * 128);
+#pragma unroll
+                for (int c = 0; c < 8; ++c)
+                    Q.template select<16, 1>((c * 8 + row) * 16) = qr.template select<16, 1>(c * 16);
+                if constexpr (!Draft) {
+                    if (part == 0) {
+                        m[row] = sink[qh] * LOG2E;
+                        total[row] = 1.f;
+                    }
+                }
+            }
+        }
+        for (int chunk = first; chunk < last; ++chunk) {
+            int index = chunk * 16;
+            const size_t off = Draft   ? size_t(index) * token_stride
+                               : Local ? size_t(index % page_size) * token_stride
+                                       : size_t(pages[index / page_size]) * block_stride +
+                                             size_t(index % page_size) * token_stride;
+            const size_t base = off + size_t(hk) * head_stride;
+            size_t packed_base = 0;
+            if constexpr (!Local && !Draft) {
+                if (packed)
+                    packed_base = size_t(pages[index / page_size]) * block_stride +
+                                  size_t(hk) * page_size * 256 + (index % page_size) / 16 * 4096;
+            }
+            simd<float, 128> score = 0;
+#pragma unroll
+            for (int c = 0; c < 8; ++c) {
+                simd<uint32_t, 128> k2;
+                if constexpr (Local) {
+                    auto kt = xesimd::lsc_load_2d<uint32_t, 8, 16, 1, true, false, xesimd::cache_hint::cached,
+                                                  xesimd::cache_hint::cached>(
+                        reinterpret_cast<const uint32_t *>(k + 2 * base), 255, 15, 2 * token_stride - 1, c * 8,
+                        0);
+                    simd<uint32_t, 256> bits = convert<uint32_t>(kt.template bit_cast_view<uint16_t>().read())
+                                               << 16;
+                    simd<fp16, 256> vals = convert<fp16>(bits.template bit_cast_view<float>().read());
+                    k2 = vals.template bit_cast_view<uint32_t>().read();
+                } else {
+                    simd<uint32_t, 64> k4;
+                    if (!Draft && packed)
+                        k4 = block_load<uint32_t, 64>(
+                            reinterpret_cast<const uint32_t *>(k + packed_base + c * 256));
+                    else
+                        k4 = xesimd::lsc_load_2d<uint32_t, 4, 16, 1, true, false, xesimd::cache_hint::cached,
+                                                 xesimd::cache_hint::cached>(
+                            reinterpret_cast<const uint32_t *>(k + base), 127, 15, token_stride - 1, c * 4, 0);
+
+#pragma unroll
+                    for (int d = 0; d < 4; ++d) {
+                        simd<uint32_t, 16> four = k4.template select<16, 1>(d * 16);
+                        simd<uint16_t, 16> lo = convert<uint16_t>(four), hi = convert<uint16_t>(four >> 16);
+                        auto val_lo = from_e4m3<32>(lo.template bit_cast_view<uint8_t>().read());
+                        k2.template select<16, 1>(d * 32) = val_lo.template bit_cast_view<uint32_t>().read();
+                        auto val_hi = from_e4m3<32>(hi.template bit_cast_view<uint8_t>().read());
+                        k2.template select<16, 1>(d * 32 + 16) =
+                            val_hi.template bit_cast_view<uint32_t>().read();
+                    }
+                }
+                score = xmx::dpas<8, 8, float, float, fp16, fp16>(
+                    score, k2.template bit_cast_view<fp16>().read(),
+                    simd<fp16, 128>(Q.template select<128, 1>(c * 128)));
+            }
+            score *= LOG2E * 0.08838834764831844f;
+            simd<float, 8> alpha;
+            simd<fp16, 128> P;
+#pragma unroll
+            for (int row = 0; row < 8; ++row) {
+                const int r = tile * 8 + row;
+                simd<float, 16> s = score.template select<16, 1>(row * 16);
+                if constexpr (Draft) {
+                    simd<int, 16> key(index, 1);
+                    s.merge(NEG, key >= L);
+                } else if (Local || index + 15 >= start - extent + 1) {
+                    simd<int, 16> key(index, 1), delta = start + r / 3 - key;
+                    simd_mask<16> valid = (delta >= 0) & (key < L) & (r < R);
+                    if constexpr (Local) {
+                        const auto stored = block_load<int, 16>(pages + index % page_size);
+                        valid &= (delta < 1024) & (stored == key);
+                    }
+                    simd_mask<16> near = valid & (delta < extent);
+                    const int qh = (r / 3) * 24 + hk * 3 + r % 3;
+                    simd<uint32_t, 16> offset = convert<uint32_t>(max(delta, simd<int, 16>(0))) * 4;
+                    if (r < R) {
+                        auto bias = gather<float, 16>(table + qh * extent, offset, near);
+                        s.merge(s + bias * LOG2E, near);
+                    }
+                    s.merge(NEG, !valid);
+                }
+                const float peak = hmax<float>(s);
+                const float mx = m[row] > peak ? float(m[row]) : peak;
+                alpha[row] = exp2(simd<float, 1>(m[row] - mx))[0];
+                simd<float, 16> p = exp2(s - mx);
+                p.merge(0.f, s < NEG * 0.5f);
+                P.template select<16, 1>(row * 16) = convert<fp16>(p);
+                total[row] = total[row] * alpha[row] + reduce<float>(p, std::plus<>());
+                m[row] = mx;
+            }
+            auto rescale = alpha.template replicate_vs_w_hs<8, 1, 16, 0>(0);
+#pragma unroll
+            for (int c = 0; c < 8; ++c) {
+                simd<uint32_t, 128> v2;
+                if constexpr (Local) {
+                    auto vt = xesimd::lsc_load_2d<uint16_t, 16, 16, 1, false, true, xesimd::cache_hint::cached,
+                                                  xesimd::cache_hint::cached>(
+                        reinterpret_cast<const uint16_t *>(v + 2 * base), 255, 15, 2 * token_stride - 1, c * 16,
+                        0);
+                    simd<uint32_t, 256> bits = convert<uint32_t>(vt) << 16;
+                    simd<fp16, 256> vals = convert<fp16>(bits.template bit_cast_view<float>().read());
+                    v2 = vals.template bit_cast_view<uint32_t>().read();
+                } else {
+                    simd<uint8_t, 256> v4;
+                    if (!Draft && packed)
+                        v4 = block_load<uint8_t, 256>(k + packed_base + 2048 + c * 256);
+                    else
+                        v4 = xesimd::lsc_load_2d<uint8_t, 16, 16, 1, false, true, xesimd::cache_hint::cached,
+                                                 xesimd::cache_hint::cached>(v + base, 127, 15,
+                                                                             token_stride - 1, c * 16, 0);
+
+#pragma unroll
+                    for (int d = 0; d < 4; ++d) {
+                        simd<uint32_t, 16> four =
+                            v4.template bit_cast_view<uint32_t>().template select<16, 1>(16 * d);
+                        simd<uint16_t, 16> lo = convert<uint16_t>(four), hi = convert<uint16_t>(four >> 16);
+                        auto val_lo = from_e4m3<32>(lo.template bit_cast_view<uint8_t>().read());
+                        v2.template select<16, 1>(d * 32) = val_lo.template bit_cast_view<uint32_t>().read();
+                        auto val_hi = from_e4m3<32>(hi.template bit_cast_view<uint8_t>().read());
+                        v2.template select<16, 1>(d * 32 + 16) =
+                            val_hi.template bit_cast_view<uint32_t>().read();
+                    }
+                }
+                simd<float, 128> acc = simd<float, 128>(O.template select<128, 1>(c * 128)) * rescale;
+                O.template select<128, 1>(c * 128) =
+                    xmx::dpas<8, 8, float, float, fp16, fp16>(acc, v2.template bit_cast_view<fp16>().read(), P);
+            }
+        }
+#pragma unroll
+        for (int row = 0; row < 8; ++row) {
+            int r = tile * 8 + row;
+            if (r >= R)
+                break;
+            int dest = part * M * 24 + (r / 3) * 24 + hk * 3 + r % 3;
+            simd<float, 128> o;
+            float den = total[row];
+#pragma unroll
+            for (int c = 0; c < 8; ++c)
+                o.template select<16, 1>(16 * c) = O.template select<16, 1>((c * 8 + row) * 16);
+            block_store<float, 128>(output + dest * 128, o * (den > 0 ? 1.f / den : 0.f));
+            lse[dest] = den > 0 ? (float(m[row]) + float(log2(simd<float, 1>(den))[0])) / LOG2E : NEG;
+        }
+    }
+};
+
+}  // namespace fa
+
+void paged_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor pages, at::Tensor length,
+               at::Tensor positions, at::Tensor table, at::Tensor sink, at::Tensor out, at::Tensor lse,
+               bool packed) {
+    const int M = q.size(0), splits = out.size(0);
+    TORCH_CHECK(q.is_xpu() && q.is_contiguous() && q.scalar_type() == at::kHalf && q.dim() == 3 &&
+                q.size(1) == 24 && q.size(2) == 128 && (M >= 1 && M <= 8));
+    TORCH_CHECK(k.dim() == 4 && k.size(1) % 16 == 0 && k.size(1) >= 16 && k.size(2) == 8 && k.size(3) == 128 &&
+                k.stride(3) == 1 && k.strides() == v.strides() && k.sizes() == v.sizes() &&
+                k.scalar_type() == at::kFloat8_e4m3fn && v.scalar_type() == k.scalar_type());
+    for (const auto &t : {k, v, pages, length, positions, table, sink, out, lse})
+        TORCH_CHECK(t.device() == q.device());
+    for (const auto &t : {pages, length, positions, table, sink, out, lse})
+        TORCH_CHECK(t.is_contiguous());
+    TORCH_CHECK(pages.scalar_type() == at::kInt && pages.dim() == 2 && pages.size(0) == 1 &&
+                length.scalar_type() == at::kInt && length.numel() == 1 &&
+                positions.scalar_type() == at::kInt && positions.numel() == M &&
+                table.scalar_type() == at::kFloat && table.dim() == 3 && table.size(0) == M &&
+                table.size(1) == 24 && table.size(2) > 0 && sink.scalar_type() == at::kFloat &&
+                sink.numel() == M * 24 && splits > 0 && out.scalar_type() == at::kFloat &&
+                out.numel() == int64_t(splits) * M * 24 * 128 && lse.scalar_type() == at::kFloat &&
+                lse.numel() == int64_t(splits) * M * 24);
+    auto &queue = queue_of(q);
+    auto launch = [&]<int Rows>() {
+        fa::PagedXmx<Rows> kern{reinterpret_cast<const sycl::half *>(q.data_ptr()),
+                                reinterpret_cast<const uint8_t *>(k.data_ptr()),
+                                reinterpret_cast<const uint8_t *>(v.data_ptr()),
+                                pages.data_ptr<int>(),
+                                length.data_ptr<int>(),
+                                positions.data_ptr<int>(),
+                                table.data_ptr<float>(),
+                                sink.data_ptr<float>(),
+                                out.data_ptr<float>(),
+                                lse.data_ptr<float>(),
+                                splits,
+                                int(k.size(1)),
+                                int(k.stride(0)),
+                                int(k.stride(1)),
+                                int(k.stride(2)),
+                                int(table.size(2)),
+                                packed};
+        const size_t n = splits * 8 * ((Rows * 3 + 7) / 8);
+        queue.submit([&](sycl::handler &h) { h.parallel_for(sycl::nd_range<1>(n, 1), kern); });
+    };
+    switch (M) {
+    case 1:
+        launch.template operator()<1>();
+        break;
+    case 2:
+        launch.template operator()<2>();
+        break;
+    case 3:
+        launch.template operator()<3>();
+        break;
+    case 4:
+        launch.template operator()<4>();
+        break;
+    case 5:
+        launch.template operator()<5>();
+        break;
+    case 6:
+        launch.template operator()<6>();
+        break;
+    case 7:
+        launch.template operator()<7>();
+        break;
+    case 8:
+        launch.template operator()<8>();
+        break;
+    }
+}
+
+// DSpark global context and the eight jointly visible query-block rows share
+// one contiguous E4M3 cache. The last physical tile is explicitly padded.
+void draft_global_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor start, at::Tensor out,
+                      at::Tensor lse) {
+    const int splits = out.size(0), rows = q.size(0);
+    TORCH_CHECK(q.is_xpu() && q.scalar_type() == at::kHalf && q.dim() == 3 && rows >= 2 && rows <= 8 &&
+                q.size(1) == 24 && q.size(2) == 128);
+    for (const auto &t : {q, k, v, start, out, lse})
+        TORCH_CHECK(t.is_contiguous() && t.device() == q.device());
+    TORCH_CHECK(k.scalar_type() == at::ScalarType::Float8_e4m3fn && v.scalar_type() == k.scalar_type() &&
+                k.sizes() == v.sizes() && k.dim() == 3 && k.size(0) % 16 == 0 && k.size(1) == 8 &&
+                k.size(2) == 128);
+    TORCH_CHECK(start.scalar_type() == at::kInt && start.numel() == 1 && splits >= 1 &&
+                out.scalar_type() == at::kFloat && lse.scalar_type() == at::kFloat &&
+                out.sizes() == at::IntArrayRef({splits, rows, 24, 128}) &&
+                lse.sizes() == at::IntArrayRef({splits, rows, 24}));
+    auto launch = [&]<int Rows>() {
+        fa::PagedXmx<Rows, false, true> kern{reinterpret_cast<const sycl::half *>(q.data_ptr()),
+                                             reinterpret_cast<const uint8_t *>(k.data_ptr()),
+                                             reinterpret_cast<const uint8_t *>(v.data_ptr()),
+                                             nullptr,
+                                             nullptr,
+                                             start.data_ptr<int>(),
+                                             nullptr,
+                                             nullptr,
+                                             out.data_ptr<float>(),
+                                             lse.data_ptr<float>(),
+                                             splits,
+                                             0,
+                                             0,
+                                             1024,
+                                             128,
+                                             0};
+        queue_of(q).submit([&](sycl::handler &h) {
+            h.parallel_for(sycl::nd_range<1>(splits * 8 * ((Rows * 3 + 7) / 8), 1), kern);
+        });
+    };
+    switch (rows) {
+    case 2:
+        launch.template operator()<2>();
+        break;
+    case 3:
+        launch.template operator()<3>();
+        break;
+    case 4:
+        launch.template operator()<4>();
+        break;
+    case 5:
+        launch.template operator()<5>();
+        break;
+    case 6:
+        launch.template operator()<6>();
+        break;
+    case 7:
+        launch.template operator()<7>();
+        break;
+    case 8:
+        launch.template operator()<8>();
+        break;
+    }
+}
+
+void local_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor pages, at::Tensor length,
+               at::Tensor positions, at::Tensor table, at::Tensor sink, at::Tensor out, at::Tensor lse) {
+    const int M = q.size(0), splits = out.size(0);
+    TORCH_CHECK(q.is_xpu() && q.is_contiguous() && q.scalar_type() == at::kHalf && q.dim() == 3 &&
+                q.size(1) == 24 && q.size(2) == 128 && (M >= 1 && M <= 8));
+    TORCH_CHECK(k.dim() == 3 && k.size(0) >= 1040 && k.size(0) % 16 == 0 && k.size(1) == 8 &&
+                k.size(2) == 128 && k.is_contiguous() && v.is_contiguous() && k.sizes() == v.sizes() &&
+                k.scalar_type() == at::kBFloat16 && v.scalar_type() == k.scalar_type());
+    for (const auto &t : {k, v, pages, length, positions, table, sink, out, lse})
+        TORCH_CHECK(t.device() == q.device());
+    for (const auto &t : {pages, length, positions, table, sink, out, lse})
+        TORCH_CHECK(t.is_contiguous());
+    TORCH_CHECK(pages.scalar_type() == at::kInt && pages.dim() == 2 && pages.size(0) == 1 &&
+                pages.size(1) == k.size(0) && length.scalar_type() == at::kInt && length.numel() == 1 &&
+                positions.scalar_type() == at::kInt && positions.numel() == M &&
+                table.scalar_type() == at::kFloat && table.dim() == 3 && table.size(0) == M &&
+                table.size(1) == 24 && table.size(2) > 0 && sink.scalar_type() == at::kFloat &&
+                sink.numel() == M * 24 && splits > 0 && out.scalar_type() == at::kFloat &&
+                out.numel() == int64_t(splits) * M * 24 * 128 && lse.scalar_type() == at::kFloat &&
+                lse.numel() == int64_t(splits) * M * 24);
+    auto &queue = queue_of(q);
+    auto launch = [&]<int Rows>() {
+        fa::PagedXmx<Rows, true> kern{reinterpret_cast<const sycl::half *>(q.data_ptr()),
+                                      reinterpret_cast<const uint8_t *>(k.data_ptr()),
+                                      reinterpret_cast<const uint8_t *>(v.data_ptr()),
+                                      pages.data_ptr<int>(),
+                                      length.data_ptr<int>(),
+                                      positions.data_ptr<int>(),
+                                      table.data_ptr<float>(),
+                                      sink.data_ptr<float>(),
+                                      out.data_ptr<float>(),
+                                      lse.data_ptr<float>(),
+                                      splits,
+                                      int(k.size(0)),
+                                      0,
+                                      int(k.stride(0)),
+                                      int(k.stride(1)),
+                                      int(table.size(2))};
+        const size_t n = splits * 8 * ((Rows * 3 + 7) / 8);
+        queue.submit([&](sycl::handler &h) { h.parallel_for(sycl::nd_range<1>(n, 1), kern); });
+    };
+    switch (M) {
+    case 1:
+        launch.template operator()<1>();
+        break;
+    case 2:
+        launch.template operator()<2>();
+        break;
+    case 3:
+        launch.template operator()<3>();
+        break;
+    case 4:
+        launch.template operator()<4>();
+        break;
+    case 5:
+        launch.template operator()<5>();
+        break;
+    case 6:
+        launch.template operator()<6>();
+        break;
+    case 7:
+        launch.template operator()<7>();
+        break;
+    case 8:
+        launch.template operator()<8>();
+        break;
+    }
+}
+
+} // namespace inkling2_dxmx
+
+TORCH_LIBRARY(inkling2_dxmx, m) {
+    m.def("draft_global_xmx(Tensor q, Tensor k, Tensor v, Tensor start, Tensor(a!) out, Tensor(b!) lse) -> ()");
+    m.impl("draft_global_xmx", torch::kXPU, &inkling2_dxmx::draft_global_xmx);
+    m.def("local_xmx(Tensor q, Tensor k, Tensor v, Tensor ring_positions, Tensor length, Tensor positions, Tensor table, Tensor sink, Tensor(a!) out, Tensor(b!) lse) -> ()");
+    m.impl("local_xmx", torch::kXPU, &inkling2_dxmx::local_xmx);
+    m.def("paged_xmx(Tensor q, Tensor k, Tensor v, Tensor pages, Tensor length, Tensor positions, Tensor table, Tensor sink, Tensor(a!) out, Tensor(b!) lse, bool packed=False) -> ()");
+    m.impl("paged_xmx", torch::kXPU, &inkling2_dxmx::paged_xmx);
+}

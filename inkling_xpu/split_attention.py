@@ -9,6 +9,21 @@ import triton.language as tl
 
 NATIVE_MERGE = os.environ.get("INKLING2_NATIVE_MERGE", "0") == "1"
 LONG_VERIFY_SPLITS = os.environ.get("INKLING2_DSPARK_LONG_SPLITS", "0") == "1"
+# The same decode XMX kernels built AOT at 256 GRF (no spills, bit-identical; scripts/build-decode-xmx.sh).
+DECODE_XMX256 = os.environ.get("INKLING2_DECODE_XMX256", "0") == "1"
+_XMX_OPS = None
+
+
+def xmx_ops():
+    """paged_xmx / local_xmx / draft_global_xmx: inkling2_xpu (JIT, 128 GRF) or inkling2_dxmx (INKLING2_DECODE_XMX_LIB)."""
+    global _XMX_OPS
+    if _XMX_OPS is None:
+        if DECODE_XMX256:
+            torch.ops.load_library(os.environ.get("INKLING2_DECODE_XMX_LIB", "/lab/.work/build/inkling2-decode-xmx.so"))
+            _XMX_OPS = torch.ops.inkling2_dxmx
+        else:
+            _XMX_OPS = torch.ops.inkling2_xpu
+    return _XMX_OPS
 
 
 @triton.jit
@@ -54,7 +69,7 @@ def paged_xmx(q, key_cache, value_cache, pages, length, pos, rel, proj, sink, pa
     rows, heads, width = q.shape
     partial = q.new_empty((parts, rows, heads, width), dtype=torch.float32)
     lse = q.new_empty((parts, rows, heads), dtype=torch.float32)
-    torch.ops.inkling2_xpu.paged_xmx(
+    xmx_ops().paged_xmx(
         q.half().contiguous(),
         key_cache,
         value_cache,
@@ -75,7 +90,7 @@ def local_xmx(q, k, v, ring_positions, length, pos, rel, proj, sink):
     parts = 16
     partial = q.new_empty((parts, rows, heads, width), dtype=torch.float32)
     lse = q.new_empty((parts, rows, heads), dtype=torch.float32)
-    torch.ops.inkling2_xpu.local_xmx(
+    xmx_ops().local_xmx(
         q.half().contiguous(),
         k,
         v,

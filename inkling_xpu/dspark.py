@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from safetensors import safe_open
 from safetensors.torch import load_file
 
-from .split_attention import merge_splits
+from .split_attention import merge_splits, xmx_ops
 
 from vllm.v1.worker.gpu.spec_decode.draft_logits import DraftLogitsCache
 from vllm.v1.worker.gpu.spec_decode.speculator import BaseSpeculator
@@ -199,7 +199,7 @@ class InklingDraft:
         lse = torch.empty_like(out[:, :, :, 0], memory_format=torch.contiguous_format)
         query = q.to(torch.float16).contiguous()
         if self.fp8_global and not capacity:
-            torch.ops.inkling2_xpu.draft_global_xmx(query, kv[0], kv[1], start, out, lse)
+            xmx_ops().draft_global_xmx(query, kv[0], kv[1], start, out, lse)
         else:
             torch.ops.inkling2_xpu.dspark_attention(
                 query, kv[0], kv[1], start, out, lse, capacity, self.window if capacity else 0
