@@ -41,6 +41,8 @@ if ! git -C "$vendor" cat-file -e "$source_commit^{commit}" 2>/dev/null; then
         https://github.com/sybil-solutions/trellis-serve.git "$source_commit"
 fi
 git -C "$vendor" checkout --quiet --detach "$source_commit"
+# The pinned vendor build scripts hard-code C++17; the vLLM 0.34 builder needs INKLING2_CXX_STD=c++20.
+sed -i "s/-std=c++17 -shared/-std=\${CXX_STD:-c++17} -shared/" "$vendor/xpu/scripts/build_inkling2.sh" "$vendor/xpu/scripts/build_moe.sh"
 if git -C "$vendor" diff --quiet -- "$source_file"; then
     git -C "$vendor" apply "$patch_file"
 fi
