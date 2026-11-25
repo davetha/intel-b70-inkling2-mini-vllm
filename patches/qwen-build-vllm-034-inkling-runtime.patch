@@ -1,0 +1,876 @@
+diff --git a/docker/direct-xpu-034-inkling/Dockerfile b/docker/direct-xpu-034-inkling/Dockerfile
+new file mode 100644
+index 0000000..e9c3fc7
+--- /dev/null
++++ b/docker/direct-xpu-034-inkling/Dockerfile
+@@ -0,0 +1,69 @@
++# Inkling 2 Mini runtime on the official vLLM v0.34.0 XPU image. No vLLM source overrides.
++FROM vllm/vllm-openai-xpu@sha256:a49fe492ef736568d4ace5ca047a6e973fdf93de18e86b20cf22a77c65f286f2 AS upstream
++FROM upstream AS runtime-base
++USER root
++COPY artifacts/ /tmp/b70-artifacts/
++RUN pip install --no-cache-dir --no-deps /tmp/b70-artifacts/torch-*.whl \
++ && pip install --no-cache-dir --no-deps /tmp/b70-artifacts/vllm_xpu_kernels-*.whl \
++ && pip install --no-cache-dir --upgrade triton-xpu==3.9.0 \
++ && pip install --no-cache-dir --upgrade intel-sycl-rt==2026.2.0 dpcpp-cpp-rt==2026.2.0 intel-pti==1.2.1 \
++ && pip install --no-cache-dir --no-deps --index-url https://download.pytorch.org/whl/xpu torchvision==0.29.2+xpu \
++ && rm -rf /tmp/b70-artifacts
++COPY direct/requirements.txt /tmp/b70-requirements.txt
++RUN pip install --no-cache-dir --no-deps -r /tmp/b70-requirements.txt
++# The 0.34 base pins its 26.31 runtime through the intel-gpu-compute metapackage and
++# ships IGC as libigc2; drop both so the 26.40/IGC 2.42.6 debs below are the only ones.
++ADD https://github.com/intel/compute-runtime/releases/download/26.40.40196.8/intel-ocloc_26.40.40196.8-0_amd64.deb /tmp/intel-runtime/intel-ocloc_26.40.40196.8-0_amd64.deb
++ADD https://github.com/intel/compute-runtime/releases/download/26.40.40196.8/intel-opencl-icd_26.40.40196.8-0_amd64.deb /tmp/intel-runtime/intel-opencl-icd_26.40.40196.8-0_amd64.deb
++ADD https://github.com/intel/compute-runtime/releases/download/26.40.40196.8/libigdgmm12_22.10.2_amd64.deb /tmp/intel-runtime/libigdgmm12_22.10.2_amd64.deb
++ADD https://github.com/intel/compute-runtime/releases/download/26.40.40196.8/libze-intel-gpu1_26.40.40196.8-0_amd64.deb /tmp/intel-runtime/libze-intel-gpu1_26.40.40196.8-0_amd64.deb
++ADD https://github.com/intel/intel-graphics-compiler/releases/download/v2.42.6/intel-igc-core-2_2.42.6%2B23070_amd64.deb /tmp/intel-runtime/intel-igc-core-2_2.42.6+23070_amd64.deb
++ADD https://github.com/intel/intel-graphics-compiler/releases/download/v2.42.6/intel-igc-opencl-2_2.42.6%2B23070_amd64.deb /tmp/intel-runtime/intel-igc-opencl-2_2.42.6+23070_amd64.deb
++RUN echo "b2868d6d7958cc5ca28fa9b48a7d39961760ee39ef07673d5b58894dd53d6b4e  /tmp/intel-runtime/intel-ocloc_26.40.40196.8-0_amd64.deb" | sha256sum -c - \
++ && echo "96046069e94680b761df6e83ddc64244721178b826e3e1f8af3ca104cfd0c7c2  /tmp/intel-runtime/intel-opencl-icd_26.40.40196.8-0_amd64.deb" | sha256sum -c - \
++ && echo "053fceadb84a1d2f9a30a0d1bc9b16424b3f1a90cc49900fcd80aadcf25c8a4d  /tmp/intel-runtime/libigdgmm12_22.10.2_amd64.deb" | sha256sum -c - \
++ && echo "d9c86b2bb195baea6936c2708846cd1fceeadc39bc5e167f728858a5ca6fb86e  /tmp/intel-runtime/libze-intel-gpu1_26.40.40196.8-0_amd64.deb" | sha256sum -c - \
++ && echo "e20539632f2d99875d8f8b225d5da58b31f98baa54bb47c6328aa98ec473ab9d  /tmp/intel-runtime/intel-igc-core-2_2.42.6+23070_amd64.deb" | sha256sum -c - \
++ && echo "7f5593cf828503ffb8450967768bde9209e22753bc576296e846b5a751011fa3  /tmp/intel-runtime/intel-igc-opencl-2_2.42.6+23070_amd64.deb" | sha256sum -c - \
++ && dpkg -r intel-gpu-compute \
++ && dpkg -i /tmp/intel-runtime/*.deb \
++ && dpkg -r libigc2 \
++ && apt-get check && rm -rf /tmp/intel-runtime && ldconfig
++
++FROM runtime-base AS native-build
++RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg patch \
++ && curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
++    | gpg --dearmor -o /usr/share/keyrings/oneapi-archive-keyring.gpg
++RUN echo 'deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main' > /etc/apt/sources.list.d/oneapi.list \
++ && apt-get update \
++ && apt-get install -y --no-install-recommends intel-oneapi-compiler-dpcpp-cpp-2026.2=2026.2.0-863 \
++ && rm -rf /var/lib/apt/lists/*
++COPY sources/onednn/ /sources/onednn/
++COPY sources/pti/ /sources/pti/
++COPY matrix-source/ /matrix-source/
++COPY direct/build-native.sh /build-tools/
++RUN bash /build-tools/build-native.sh
++COPY direct/pti/ /build-tools/pti/
++RUN bash -c 'source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 && python /build-tools/pti/build.py'
++
++FROM runtime-base AS candidate
++COPY --from=native-build /opt/b70/ /opt/b70/
++COPY --from=native-build /native/ /native/
++COPY --from=native-build /opt/b70-pti/lib/libpti_view.so.1.2.1 /opt/venv/lib/libpti_view.so.1.2.1
++COPY --from=native-build /opt/b70-pti/lib/pti/libpti.so /opt/venv/lib/pti/libpti.so
++COPY --from=native-build /sources/onednn/LICENSE /opt/b70-direct/licenses/oneDNN-LICENSE
++COPY --from=native-build /sources/pti/LICENSE /opt/b70-direct/licenses/PTI-LICENSE
++COPY matrix-source/ /opt/exl3xpu/native-matrix-source/
++COPY direct/pti/ /opt/b70-direct/pti/
++COPY direct/build-lock.json direct/source-manifest.json direct/build-native.sh direct/install-inkling.py direct/check-image-inkling.py /opt/b70-direct/
++# The 0.34 base ships the Ubuntu-PPA build of the Level Zero 1.32.0 loader; with the UR L0 v2 adapter
++# (needed for XPU graphs) model loading hangs in urEventWait. The 0.33 base loader build (same 1.32.0)
++# works, so take the loader and its layers from that pinned image.
++COPY --from=vllm/vllm-openai-xpu@sha256:010bdc441c72ee222f459d3b688bb41317525f1bd7223afe6218490b0c526832 /usr/lib/x86_64-linux-gnu/libze_loader.so.1.32.0 /usr/lib/x86_64-linux-gnu/libze_tracing_layer.so.1.32.0 /usr/lib/x86_64-linux-gnu/libze_validation_layer.so.1.32.0 /usr/lib/x86_64-linux-gnu/
++RUN echo "93661120ef96602219c0d86717b0b47380f76693b1d8fef03816bbdae247f455  /usr/lib/x86_64-linux-gnu/libze_loader.so.1.32.0" | sha256sum -c - && ldconfig
++ENV LD_LIBRARY_PATH=/opt/b70:/opt/b70/lib:/opt/ucx/lib:/opt/venv/lib:/usr/local/lib
++RUN python /opt/b70-direct/install-inkling.py && python /opt/b70-direct/check-image-inkling.py
++ENV EXL3_SDPA_CACHE_CAPACITY=64
++LABEL org.local.b70.release-status="CANDIDATE_UNQUALIFIED" org.local.b70.experiment="direct-xpu-034-inkling"
++ENTRYPOINT ["/opt/venv/bin/vllm"]
++CMD ["--help"]
+diff --git a/engine/direct-xpu-034-inkling/build-lock.json b/engine/direct-xpu-034-inkling/build-lock.json
+new file mode 100644
+index 0000000..4df7301
+--- /dev/null
++++ b/engine/direct-xpu-034-inkling/build-lock.json
+@@ -0,0 +1,142 @@
++{
++  "schema": 1,
++  "status": "CANDIDATE_BUILD_NOT_QUALIFIED",
++  "checked_at": "2026-11-22",
++  "latest_stable": {
++    "version": "0.34.0",
++    "release_tag": "v0.34.0",
++    "prerelease": false,
++    "url": "https://github.com/vllm-project/vllm/releases/tag/v0.34.0"
++  },
++  "upstream_image": "vllm/vllm-openai-xpu@sha256:a49fe492ef736568d4ace5ca047a6e973fdf93de18e86b20cf22a77c65f286f2",
++  "upstream_image_id": "sha256:a49fe492ef736568d4ace5ca047a6e973fdf93de18e86b20cf22a77c65f286f2",
++  "compiler_package": "intel-oneapi-compiler-dpcpp-cpp-2026.2=2026.2.0-863",
++  "native_build_jobs": 4,
++  "sources": {
++    "onednn": {
++      "url": "https://codeload.github.com/uxlfoundation/oneDNN/tar.gz/4db284662a37cf46401655b5ee99391d9de52c00",
++      "commit": "4db284662a37cf46401655b5ee99391d9de52c00",
++      "sha256": "55e319d174c6c3884b66e7d643d9579a96d73b20159580dc3b1f89de4875da9c",
++      "version": "3.14.2",
++      "runtime_version": "3.14.1",
++      "release_tag": "v3.14.2",
++      "version_note": "Official v3.14.2 tag resolves to this commit, whose CMakeLists.txt still sets PROJECT_VERSION3.14.1. Preserve the release source unchanged; check its actual runtime version separately."
++    },
++    "xpu-kernels": {
++      "url": "https://codeload.github.com/vllm-project/vllm-xpu-kernels/tar.gz/6a1ec18b69b00eaf67a457e0bdd40e72632feaae",
++      "commit": "6a1ec18b69b00eaf67a457e0bdd40e72632feaae",
++      "sha256": "4bb373502619cafedb5a951c681b8c129906baa6da3d81bc8ced1bbab5510e63"
++    },
++    "sycl-tla": {
++      "url": "https://codeload.github.com/intel/sycl-tla/tar.gz/7b56b936b87f799f80dde60c2fd8d11c1128cebb",
++      "commit": "7b56b936b87f799f80dde60c2fd8d11c1128cebb",
++      "sha256": "820b1953977156f12c48d5555a951f3dde2adaaf499612a1f9fe61b91e73fd22"
++    },
++    "pti": {
++      "url": "https://codeload.github.com/intel/pti-gpu/tar.gz/25a77ed7693ac155bc62e563060b0976f9934b53",
++      "commit": "25a77ed7693ac155bc62e563060b0976f9934b53",
++      "sha256": "8948d94feac8786bf5ee1f69305061c0678aebdff89bcc37665ff84b7ae53fa7",
++      "version": "1.2.1",
++      "fix_commit": "dd8940ff817f94461795708fe3c386ab9e09d3b1"
++    }
++  },
++  "python_packages": {
++    "transformers": "5.22.2",
++    "tokenizers": "0.23.3",
++    "mcp": "2.3.0",
++    "mcp-types": "2.3.0",
++    "auto-round-lib": "0.16.0"
++  },
++  "core_packages": {
++    "torch": "2.15.0+xpu",
++    "triton-xpu": "3.9.0",
++    "vllm-xpu-kernels": "0.1.17.1",
++    "intel-sycl-rt": "2026.2.0",
++    "dpcpp-cpp-rt": "2026.2.0",
++    "intel-pti": "1.2.1",
++    "torchvision": "0.29.2+xpu",
++    "oneccl": "2022.1.2",
++    "oneccl-devel": "2022.1.2"
++  },
++  "artifacts": [
++    {
++      "filename": "torch-2.15.0+xpu-cp312-cp312-manylinux_2_28_x86_64.whl",
++      "url": "https://download-r2.pytorch.org/whl/xpu/torch-2.15.0%2Bxpu-cp312-cp312-manylinux_2_28_x86_64.whl",
++      "sha256": "7ccfe7bd112232fddafb644656e8f10045ee5bc828407678c58a73ac6b86ff58"
++    },
++    {
++      "filename": "vllm_xpu_kernels-0.1.17.1-cp38-abi3-manylinux_2_28_x86_64.whl",
++      "url": "https://github.com/vllm-project/vllm-xpu-kernels/releases/download/v0.1.17/vllm_xpu_kernels-0.1.17.1-cp38-abi3-manylinux_2_28_x86_64.whl",
++      "sha256": "ff07d74977f0e3debd67d73534b75e1f569fece23ae7bbc8465c749eb6e9a287"
++    }
++  ],
++  "driver_packages": [
++    {
++      "name": "intel-ocloc_26.40.40196.8-0_amd64.deb",
++      "url": "https://github.com/intel/compute-runtime/releases/download/26.40.40196.8/intel-ocloc_26.40.40196.8-0_amd64.deb",
++      "sha256": "b2868d6d7958cc5ca28fa9b48a7d39961760ee39ef07673d5b58894dd53d6b4e"
++    },
++    {
++      "name": "intel-opencl-icd_26.40.40196.8-0_amd64.deb",
++      "url": "https://github.com/intel/compute-runtime/releases/download/26.40.40196.8/intel-opencl-icd_26.40.40196.8-0_amd64.deb",
++      "sha256": "96046069e94680b761df6e83ddc64244721178b826e3e1f8af3ca104cfd0c7c2"
++    },
++    {
++      "name": "libigdgmm12_22.10.2_amd64.deb",
++      "url": "https://github.com/intel/compute-runtime/releases/download/26.40.40196.8/libigdgmm12_22.10.2_amd64.deb",
++      "sha256": "053fceadb84a1d2f9a30a0d1bc9b16424b3f1a90cc49900fcd80aadcf25c8a4d"
++    },
++    {
++      "name": "libze-intel-gpu1_26.40.40196.8-0_amd64.deb",
++      "url": "https://github.com/intel/compute-runtime/releases/download/26.40.40196.8/libze-intel-gpu1_26.40.40196.8-0_amd64.deb",
++      "sha256": "d9c86b2bb195baea6936c2708846cd1fceeadc39bc5e167f728858a5ca6fb86e"
++    },
++    {
++      "name": "intel-igc-core-2_2.42.6+23070_amd64.deb",
++      "url": "https://github.com/intel/intel-graphics-compiler/releases/download/v2.42.6/intel-igc-core-2_2.42.6%2B23070_amd64.deb",
++      "sha256": "e20539632f2d99875d8f8b225d5da58b31f98baa54bb47c6328aa98ec473ab9d"
++    },
++    {
++      "name": "intel-igc-opencl-2_2.42.6+23070_amd64.deb",
++      "url": "https://github.com/intel/intel-graphics-compiler/releases/download/v2.42.6/intel-igc-opencl-2_2.42.6%2B23070_amd64.deb",
++      "sha256": "7f5593cf828503ffb8450967768bde9209e22753bc576296e846b5a751011fa3"
++    }
++  ],
++  "dependency_policy": "Newest stable components tested first. Preserve newer reference components. Use unmodified Torch2.15 with PTI1.2.1 rebuilt from its exact source plus upstream native-graph lifetime fix; no older Torch pin or native-recording fallback is needed after qualification.",
++  "metadata_overrides": {
++    "core": "Retain newer reference components and test latest SYCL2026.2/PTI1.2.1 beyond Torch2.15 exact metadata. Preserve CCL2022.1.2; never silently downgrade the reference.",
++    "vllm": "Torch2.15, Transformers5.22.2, kernels0.1.17.1 and xgrammar0.2.9 exceed0.33 exact/range metadata; full profile qualification required, not a clean pip-check claim.",
++    "pti": "Python metadata remains1.2.1; the two PTI libraries are rebuilt with the recorded upstream native-graph lifetime backport. Library hashes and source provenance are retained."
++  },
++  "regression_probe": {
++    "status": "TORCH_215_PTI_GRAPH_FIX_SELECTED_PENDING_FULL_QUALIFICATION",
++    "observed": "Original Torch2.15/PTI1.2.1 produces wrong two-row graph outputs after XPU profiling, also in standalone PyTorch without vLLM/EXL3/Triton/weights.",
++    "selection": "Backport Intel PTI native-graph resource/lifetime fix dd8940ff817f94461795708fe3c386ab9e09d3b1 to exact wheel source 25a77ed7693ac155bc62e563060b0976f9934b53. Original full matrix/attention/GDN gates and standalone native replay profiling (9 real kernel events) pass. Full final-image qualification remains required.",
++    "generation_m04": {
++      "status": "MINIMAL_KERNEL_FIX_PENDING_END_TO_END_AND_FULL_QUALIFICATION",
++      "observed": "Active V2 trace reproduces exact token loop; first target invalidity is self-attention layer3, rows preceding a64-token tile boundary. Original packed M04 kernel fails11/40 standalone FP32-oracle cases, fixed kernel passes40/40.",
++      "cause": "New header contract normalizes every split independently. An entirely causally masked split has zero denominator;0/0 partial output poisons the later zero-weight combine. Older header kept multi-split partials unnormalized and skipped zero-mass splits.",
++      "selection": "Retain newest stack, MTP3 and native graphs. Zero contribution only for structurally empty packed causal splits; restore standard compilation as a new candidate requiring fresh qualification. No Torch patch, token mask or NaN sanitization."
++    }
++  },
++  "dpkg_packages": {
++    "intel-igc-core-2": "2.42.6",
++    "intel-igc-opencl-2": "2.42.6",
++    "intel-ocloc": "26.40.40196.8-0",
++    "intel-opencl-icd": "26.40.40196.8-0",
++    "libze-intel-gpu1": "26.40.40196.8-0",
++    "libigdgmm12": "22.10.2"
++  },
++  "torch_git_revision": "d0f2af8b66b20da4baa50644c0cd3f887a2eae2e",
++  "pristine_torch_init_sha256": "7ed81103f3d256de131b886e67be458b3205784e3b4af9c495041282391e19db",
++  "compatibility_exceptions": {
++    "transformers": {
++      "latest_tested": "5.23.0",
++      "selected": "5.22.2",
++      "reason": "5.23 breaks vLLM0.33 two-pass Qwen video preprocessing. A valid2s320x240 clip is rejected as295241 tokens; the CPU integration also rejects the deferred video placeholder after the video has been processed separately.",
++      "control": "Same Torch2.15/PTI-fixed image with only Transformers changed to5.22.2 passes the unchanged real1/4video count, rejection-over-limit and oversized-image API gate. Direct HF4-frame processing alone passes in both versions.",
++      "selection_rule": "Latest compatible stable minor patch5.22.2, above the reference5.17.0. No other new component is rolled back. Full clean-image qualification still required."
++    }
++  },
++  "variant": "Inkling-only: _C.so + oneDNN + PTI; no M04, no vLLM overrides, no exl3xpu Python runtime; xgrammar stays at the base 0.2.8."
++}
+diff --git a/engine/direct-xpu-034-inkling/build-native.sh b/engine/direct-xpu-034-inkling/build-native.sh
+new file mode 100644
+index 0000000..6cf4916
+--- /dev/null
++++ b/engine/direct-xpu-034-inkling/build-native.sh
+@@ -0,0 +1,20 @@
++#!/usr/bin/env bash
++# Inkling-only native build for the vLLM 0.34 runtime: oneDNN + EXL3 _C.so (no M04).
++set -eo pipefail
++source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
++set -u
++mkdir /native
++icpx --version > /native/compiler-version.txt
++cmake -S /sources/onednn -B /build-onednn -G Ninja \
++ -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx \
++ -DCMAKE_INSTALL_PREFIX=/opt/b70 -DONEDNN_CPU_RUNTIME=NONE \
++ -DONEDNN_GPU_RUNTIME=SYCL -DONEDNN_GPU_VENDOR=INTEL \
++ -DONEDNN_BUILD_GRAPH=ON -DONEDNN_BUILD_TESTS=OFF -DONEDNN_BUILD_EXAMPLES=OFF
++cmake --build /build-onednn --parallel 32
++cmake --install /build-onednn
++cp -L /opt/b70/lib/libdnnl.so.3 /opt/b70/libdnnl.so.3
++cd /matrix-source
++EXL3_OUT=/native/_C.so EXL3_BUILD_LOG=/native/exl3-compiler.log \
++ EXL3_DNNL_ROOT=/opt/b70 EXL3_FLAGS=-DEXL3_DPAS_MB4 bash scripts/build_ext.sh
++dpkg-query -W > /native/dpkg-packages.txt
++python -m pip freeze > /native/python-packages.txt
+diff --git a/engine/direct-xpu-034-inkling/check-image-inkling.py b/engine/direct-xpu-034-inkling/check-image-inkling.py
+new file mode 100644
+index 0000000..9011c25
+--- /dev/null
++++ b/engine/direct-xpu-034-inkling/check-image-inkling.py
+@@ -0,0 +1,48 @@
++"""CPU-only checks for the Inkling vLLM 0.34 runtime; no weights or GPU needed."""
++import ctypes
++import hashlib
++import importlib.metadata as metadata
++import json
++from pathlib import Path
++import subprocess
++
++import torch
++import vllm
++
++ROOT = Path('/opt/b70-direct')
++lock = json.loads((ROOT / 'build-lock.json').read_text())
++assert vllm.__version__.split('+')[0] == lock['latest_stable']['version'], vllm.__version__
++assert bool(torch._C._GLIBCXX_USE_CXX11_ABI)
++assert torch.version.git_version == lock['torch_git_revision']
++assert hashlib.sha256(Path(torch.__file__).read_bytes()).hexdigest() == lock['pristine_torch_init_sha256']
++pti_receipt = json.loads((ROOT / 'pti-patch.json').read_text())
++for path, expected in pti_receipt['library_sha256'].items():
++    assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == expected, path
++pti = ctypes.CDLL('/opt/venv/lib/libpti_view.so')
++pti.ptiVersionString.restype = ctypes.c_char_p
++assert pti.ptiVersionString().decode() == pti_receipt['version']
++for name, version in {**lock['core_packages'], **lock['python_packages']}.items():
++    assert metadata.version(name) == version, (name, metadata.version(name), version)
++for name, version in lock['dpkg_packages'].items():
++    actual = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', name], text=True)
++    assert actual == version, (name, actual, version)
++
++
++class DnnlVersion(ctypes.Structure):
++    _fields_ = [('major', ctypes.c_int), ('minor', ctypes.c_int), ('patch', ctypes.c_int)]
++
++
++onednn = ctypes.CDLL('/opt/b70/lib/libdnnl.so')
++onednn.dnnl_version.restype = ctypes.POINTER(DnnlVersion)
++v = onednn.dnnl_version().contents
++actual = f'{v.major}.{v.minor}.{v.patch}'
++assert actual == lock['sources']['onednn']['runtime_version'], ('oneDNN', actual)
++torch.ops.load_library('/opt/exl3xpu/exl3xpu/_C.so')
++assert hasattr(torch.ops.exl3xpu_C, 'exl3_sdpa')
++assert torch._C._dispatch_has_kernel_for_dispatch_key('exl3xpu_C::exl3_sdpa', 'XPU')
++from vllm.v1.worker.gpu.spec_decode.speculator_config import register_speculative_method  # noqa: F401
++from vllm.v1.worker.gpu.spec_decode.draft_logits import DraftLogitsCache  # noqa: F401
++freeze = subprocess.check_output(['python', '-m', 'pip', 'freeze'], text=True)
++(ROOT / 'pip-freeze.txt').write_text(freeze)
++print(json.dumps({'status': 'CPU_IMPORT_CHECKS_PASS_GPU_UNTESTED', 'vllm': vllm.__version__,
++                  'torch': torch.__version__, 'onednn': actual, 'gpu_tests_executed': False}))
+diff --git a/engine/direct-xpu-034-inkling/install-inkling.py b/engine/direct-xpu-034-inkling/install-inkling.py
+new file mode 100644
+index 0000000..f67d0a0
+--- /dev/null
++++ b/engine/direct-xpu-034-inkling/install-inkling.py
+@@ -0,0 +1,44 @@
++"""Bind the freshly built PTI libraries and EXL3 _C.so into the Inkling 0.34 runtime.
++
++Inkling needs only the native _C.so (exl3xpu_C::exl3_sdpa) and oneDNN; no vLLM
++source overrides and no exl3xpu Python package are installed.
++"""
++import hashlib
++import json
++from pathlib import Path
++import shutil
++
++ROOT = Path('/opt/b70-direct')
++ENGINE = Path('/opt/exl3xpu/exl3xpu')
++TORCH_INIT = Path('/opt/venv/lib/python3.12/site-packages/torch/__init__.py')
++
++
++def sha(path):
++    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++
++
++def main():
++    lock = json.loads((ROOT / 'build-lock.json').read_text())
++    sources = json.loads((ROOT / 'source-manifest.json').read_text())
++    for name, expected in sources['files_sha256'].items():
++        if sha(ROOT / name) != expected:
++            raise RuntimeError('Unreviewed integration source: ' + name)
++    if sha(TORCH_INIT) != lock['pristine_torch_init_sha256']:
++        raise RuntimeError('Unexpected modification to official Torch loader')
++    pti = json.loads(Path('/native/pti-patch.json').read_text())
++    assert pti['base_commit'] == lock['sources']['pti']['commit']
++    assert pti['fix_commit'] == lock['sources']['pti']['fix_commit']
++    for path, expected in pti['library_sha256'].items():
++        assert sha(path) == expected, path
++    (ROOT / 'pti-patch.json').write_text(json.dumps(pti, indent=2) + '\n')
++    ENGINE.mkdir(parents=True, exist_ok=True)
++    for name in ('_C.so', '_C.so.manifest.json'):
++        shutil.copyfile(Path('/native') / name, ENGINE / name)
++    (ROOT / 'installation.json').write_text(json.dumps({
++        'status': 'INSTALLED_BUILD_NOT_QUALIFIED', 'variant': 'inkling-vllm034',
++        'native_C_sha256': sha(ENGINE / '_C.so'), 'native_gpu_tests_executed': False,
++    }, indent=2) + '\n')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/engine/direct-xpu-034-inkling/pti/README.md b/engine/direct-xpu-034-inkling/pti/README.md
+new file mode 100644
+index 0000000..b5351fb
+--- /dev/null
++++ b/engine/direct-xpu-034-inkling/pti/README.md
+@@ -0,0 +1,25 @@
++# PTI native-graph lifetime fix
++
++The tested Torch 2.15 / PTI 1.2.1 stack replays incorrect graph outputs after
++XPU profiling. A small standalone PyTorch reproduction needs no vLLM,
++EXL3, Triton compilation or model weights.
++
++Intel's [upstream fix](https://github.com/intel/pti-gpu/commit/dd8940ff817f94461795708fe3c386ab9e09d3b1)
++cleans up profiler-owned native graphs and stale handles when graphs are
++destroyed or tracing is disabled. The source revision embedded in the
++published 1.2.1 library predates this fix. The direct build applies its four
++runtime-file changes to that exact source; tests and CI changes are omitted.
++
++Torch remains the unmodified official wheel. Native graph recording and
++per-kernel replay profiling stay enabled. The unchanged original matrix,
++attention and GDN gates pass with the backport; the standalone replay test
++also records all nine expected GPU kernel events. Final-image quality and
++serving qualification is tracked in the
++[test evidence](../../../benchmarks/results/direct-xpu-20261114/README.md).
++
++[upstream.json](upstream.json) pins source files before/after the patch,
++the upstream commit, patch hash and build dependencies. [build.py](build.py)
++checks these identities, builds with two jobs, and records library hashes.
++Only PTI's interface and core library enter the runtime image; the selected
++Level Zero loader and Intel userspace are retained. PTI's MIT license is
++copied into the image. No precompiled local binary is a build input.
+diff --git a/engine/direct-xpu-034-inkling/pti/build.py b/engine/direct-xpu-034-inkling/pti/build.py
+new file mode 100644
+index 0000000..d7c8a73
+--- /dev/null
++++ b/engine/direct-xpu-034-inkling/pti/build.py
+@@ -0,0 +1,56 @@
++"""Build the pinned upstream PTI graph-lifetime fix; preserve other runtimes."""
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++
++HERE = Path(__file__).resolve().parent
++
++
++def sha(path):
++    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++
++
++def verify(source, expected):
++    for name, digest in expected.items():
++        if sha(source / name) != digest:
++            raise RuntimeError('Unsupported PTI source: ' + name)
++
++
++def main():
++    source = Path('/sources/pti')
++    build = Path('/build-pti')
++    prefix = Path('/opt/b70-pti')
++    lock = json.loads((HERE / 'upstream.json').read_text())
++    assert (source / 'sdk/VERSION').read_text().strip() == lock['version']
++    patch = HERE / 'native-graph-lifetime.patch'
++    assert sha(patch) == lock['patch_sha256']
++    verify(source, lock['files_before_sha256'])
++    subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-d', str(source),
++                    '-i', str(patch)], check=True)
++    verify(source, lock['files_after_sha256'])
++    argv = ['cmake', '-S', str(source / 'sdk'), '-B', str(build), '-G', 'Ninja',
++            '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_C_COMPILER=icx', '-DCMAKE_CXX_COMPILER=icpx',
++            '-DCMAKE_INSTALL_PREFIX=' + str(prefix), '-DCMAKE_INSTALL_LIBDIR=lib',
++            '-DBUILD_TESTING=OFF', '-DPTI_BUILD_TESTING=OFF', '-DPTI_BUILD_SAMPLES=OFF',
++            '-DPTI_BUILD_URGEMM=OFF',
++            '-DPTI_COMMIT_HASH=' + lock['base_commit'] + '+' + lock['fix_commit'][:7]]
++    subprocess.run(argv, check=True)
++    dependencies = {
++        path.name: subprocess.check_output(['git', '-C', str(path), 'rev-parse', 'HEAD'], text=True).strip()
++        for path in (build / '_deps').glob('*-src') if (path / '.git').exists()}
++    assert dependencies == lock['build_dependencies'], dependencies
++    subprocess.run(['cmake', '--build', str(build), '--parallel', '2'], check=True)
++    subprocess.run(['cmake', '--install', str(build)], check=True)
++    # Install only these two libraries in the final image. In particular, do
++    # not replace the selected Level Zero loader or other Intel userspace.
++    libraries = {'/opt/venv/lib/libpti_view.so.1.2.1': prefix / 'lib/libpti_view.so.1.2.1',
++                 '/opt/venv/lib/pti/libpti.so': prefix / 'lib/pti/libpti.so'}
++    receipt = {**lock, 'status': 'BUILT_GPU_UNTESTED', 'cmake_argv': argv,
++               'library_sha256': {dest: sha(path) for dest, path in libraries.items()},
++               'torch_source_modified': False, 'native_recording_disabled': False}
++    Path('/native/pti-patch.json').write_text(json.dumps(receipt, indent=2) + '\n')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/engine/direct-xpu-034-inkling/pti/native-graph-lifetime.patch b/engine/direct-xpu-034-inkling/pti/native-graph-lifetime.patch
+new file mode 100644
+index 0000000..4eee8cb
+--- /dev/null
++++ b/engine/direct-xpu-034-inkling/pti/native-graph-lifetime.patch
+@@ -0,0 +1,299 @@
++diff --git a/sdk/src/levelzero/ze_collector.h b/sdk/src/levelzero/ze_collector.h
++index cb1d932..7f40e80 100644
++--- a/sdk/src/levelzero/ze_collector.h
+++++ b/sdk/src/levelzero/ze_collector.h
++@@ -398,9 +398,9 @@ class ZeCollector {
++     // In the past: pre- oneAPI 2025.2 and old L0, on Windows due to not specified DLLs unload order
++     // we had issues here.
++     // Now this works and prevents from receiving L0 Callbacks when the process is winding down.
++-    overhead::Init();
++-    [[maybe_unused]] ze_result_t status = zelTracerSetEnabled(tracer_, false);
++-    overhead_fini(zelTracerSetEnabled_id);
+++    overhead::ScopedOverheadCollector overhead_fini(zelTracerSetEnabled_id);
+++    [[maybe_unused]] const auto status =
+++        zelTracerSetEnabled(tracer_, static_cast<ze_bool_t>(false));
++     SPDLOG_DEBUG("In {}, zelTracerSetEnabled(.., false) returns: {:x}", __func__,
++                  static_cast<uint32_t>(status));
++   }
++@@ -3329,6 +3329,17 @@ class ZeCollector {
++     }
++   }
++ 
+++  static void OnEnterExecutableGraphDestroyExt(ze_executable_graph_destroy_ext_params_t* params,
+++                                               void* global_data, void** /*instance_data*/) {
+++    SPDLOG_TRACE("In {}", __FUNCTION__);
+++    auto* const collector = static_cast<ZeCollector*>(global_data);
+++    collector->ProcessCommandsAndReturnCommandExecutionsRecordsToUser(nullptr, nullptr);
+++    auto removed_instrumented_graph = collector->graph_storage_.Remove(*params->phGraph);
+++    if (removed_instrumented_graph) {
+++      collector->ReleaseInstrumentedGraph(*removed_instrumented_graph);
+++    }
+++  }
+++
++   static void OnExitKernelSetGroupSize(ze_kernel_set_group_size_params_t* params,
++                                        ze_result_t result, void* global_data,
++                                        void** /*instance_data*/) {
++@@ -3464,17 +3475,27 @@ class ZeCollector {
++     }
++   }
++ 
+++  static void OnEnterContextDestroy(ze_context_destroy_params_t* params, void* global_data,
+++                                    void** /*instance_data*/) {
+++    SPDLOG_TRACE("In {}", __FUNCTION__);
+++    auto* const ctx = *(params->phContext);
+++    if (!ctx) {
+++      return;
+++    }
+++    auto* const collector = static_cast<ZeCollector*>(global_data);
+++    for (const auto& graph_info : collector->graph_storage_.RemoveContext(ctx)) {
+++      collector->ReleaseInstrumentedGraph(*graph_info);
+++    }
+++    collector->ProcessCommandsAndReturnCommandExecutionsRecordsToUser(nullptr, nullptr);
+++    collector->event_cache_.ReleaseContext(*(params->phContext));
+++    collector->event_pool_manager_.Clear(*(params->phContext));
+++  }
+++
++   static void OnExitContextDestroy(ze_context_destroy_params_t* params, ze_result_t result,
++                                    void* global_data, void** /*instance_data*/) {
++     SPDLOG_TRACE("In {}, result: {}", __FUNCTION__, static_cast<uint32_t>(result));
++     if (result == ZE_RESULT_SUCCESS) {
++       ZeCollector* collector = static_cast<ZeCollector*>(global_data);
++-      {
++-        const std::lock_guard<std::mutex> lock(collector->lock_);
++-        collector->ProcessCalls(nullptr, nullptr, nullptr);
++-      }
++-      collector->event_cache_.ReleaseContext(*(params->phContext));
++-      collector->event_pool_manager_.Clear(*(params->phContext));
++       collector->event_pools_observer_.ClearContext(*(params->phContext));
++     }
++   }
++@@ -3668,12 +3689,51 @@ class ZeCollector {
++     return true;
++   }
++ 
+++  void ReleaseInstrumentedGraph(ZeGraphInfo& graph_info) {
+++    const std::lock_guard<std::mutex> lock(graph_info.execution_mutex);
+++    auto& execution = graph_info.execution;
+++    if (!execution.instrumented_graph && !execution.instrumented_executable_graph) {
+++      return;
+++    }
+++
+++    if (!SynchronizePreviousExecution(&graph_info).second) {
+++      SPDLOG_WARN("Leaking instrumented graphs of graph {}: previous execution did not complete",
+++                  static_cast<const void*>(graph_info.graph));
+++      return;
+++    }
+++
+++    if (execution.instrumented_executable_graph) {
+++      overhead::ScopedOverheadCollector overhead_collector{zeExecutableGraphDestroyExt_id};
+++      auto result =
+++          l0_wrapper_.w_zeExecutableGraphDestroyExt(execution.instrumented_executable_graph);
+++      if (result != ZE_RESULT_SUCCESS) {
+++        SPDLOG_ERROR("Failed to destroy instrumented executable graph {}, result: {:x}",
+++                     static_cast<const void*>(execution.instrumented_executable_graph),
+++                     static_cast<uint32_t>(result));
+++        return;
+++      }
+++      execution.instrumented_executable_graph = nullptr;
+++    }
+++
+++    if (execution.instrumented_graph) {
+++      overhead::ScopedOverheadCollector overhead_collector{zeGraphDestroyExt_id};
+++      auto result = l0_wrapper_.w_zeGraphDestroyExt(execution.instrumented_graph);
+++      if (result != ZE_RESULT_SUCCESS) {
+++        SPDLOG_ERROR("Failed to destroy instrumented graph {}, result: {:x}",
+++                     static_cast<const void*>(execution.instrumented_graph),
+++                     static_cast<uint32_t>(result));
+++        return;
+++      }
+++      execution.instrumented_graph = nullptr;
+++    }
+++  }
+++
++   static void OnEnterCommandListAppendGraphExt(ze_command_list_append_graph_ext_params_t* params,
++                                                void* global_data, void** instance_data) {
++     SPDLOG_TRACE("In {}", __FUNCTION__);
++     auto* const collector = static_cast<ZeCollector*>(global_data);
++ 
++-    auto* const graph_info = collector->graph_storage_.GetInfo(*params->phGraph);
+++    const auto graph_info = collector->graph_storage_.GetInfo(*params->phGraph);
++     if (!graph_info) {
++       SPDLOG_ERROR("Failed to get graph info");
++       return;
++@@ -3688,7 +3748,8 @@ class ZeCollector {
++     // instrumented graph for overlapping executions. Executions records should be processed again
++     // to make sure all timestamps are collected.
++     // Check graph
++-    auto [graph_completion_event, success] = collector->SynchronizePreviousExecution(graph_info);
+++    auto [graph_completion_event, success] =
+++        collector->SynchronizePreviousExecution(graph_info.get());
++     if (!success) {
++       SPDLOG_WARN(
++           "Skipping replay trace due to failed synchronization of previous execution of graph {} "
++@@ -3879,8 +3940,6 @@ class ZeCollector {
++         ref_count++;
++         return ref_count;
++       }
++-      // NOTE: Re-enable ClearCommandListMap() if stale command list info becomes an issue. For now,
++-      // keep the same behavior (pre-On-Demand SYCL Graph tracing).
++       if (parent_collector_->options_.disabled_mode) {
++         ze_result_t status = parent_collector_->l0_wrapper_.w_zelEnableTracingLayer();
++         if (ZE_RESULT_SUCCESS == status) {
++@@ -3926,6 +3985,17 @@ class ZeCollector {
++       parent_collector_->cb_enabled_.fcallback = false;
++       if (ZeCollectionMode::kHybrid == parent_collector_->collection_mode_)
++         parent_collector_->options_.hybrid_mode = true;
+++      if (ZeCollectionMode::kFull != parent_collector_->collection_mode_) {
+++        // On Hybrid and Local modes, there's a chance that the graph will be destroyed and the
+++        // handle re-used while tracing is off. This alleviates this issue by
+++        // clearing the stored commands to prevents to prevent stale command
+++        // list and graph handles from being used.
+++        parent_collector_->ClearCommandListMap();
+++        for (const auto& [executable_graph, graph_info] :
+++             parent_collector_->graph_storage_.RemoveAll()) {
+++          parent_collector_->ReleaseInstrumentedGraph(*graph_info);
+++        }
+++      }
++       return ref_count;
++     }
++ 
++diff --git a/sdk/src/levelzero/ze_gpu_command.h b/sdk/src/levelzero/ze_gpu_command.h
++index 90c0e3b..df87846 100644
++--- a/sdk/src/levelzero/ze_gpu_command.h
+++++ b/sdk/src/levelzero/ze_gpu_command.h
++@@ -164,7 +164,7 @@ struct ZeGraphInfo {
++ };
++ 
++ struct ZeGraphAppendInstanceData {
++-  ZeGraphInfo* graph_info = nullptr;
+++  std::shared_ptr<ZeGraphInfo> graph_info;
++   ze_event_handle_t user_graph_signal_event = nullptr;  // User's signal event they passed to the
++                                                         // graph append call.
++   ze_event_handle_t graph_completion_event =
++diff --git a/sdk/src/levelzero/ze_graph_storage.h b/sdk/src/levelzero/ze_graph_storage.h
++index 22f13c8..0c3c789 100644
++--- a/sdk/src/levelzero/ze_graph_storage.h
+++++ b/sdk/src/levelzero/ze_graph_storage.h
++@@ -13,6 +13,8 @@
++ #include <mutex>
++ #include <shared_mutex>
++ #include <unordered_map>
+++#include <utility>
+++#include <vector>
++ 
++ #include "overhead_kinds.h"
++ #include "ze_gpu_command.h"
++@@ -22,28 +24,63 @@ class ZeGraphStorage {
++  public:
++   explicit ZeGraphStorage(Level0Wrapper* wrapper) : loader_(wrapper) {}
++ 
++-  ZeGraphInfo* GetInfo(ze_executable_graph_handle_t executable_graph_handle) {
+++  std::shared_ptr<ZeGraphInfo> GetInfo(ze_executable_graph_handle_t executable_graph_handle) {
++     {
++       std::shared_lock lock(mutex_);
++       auto graph_it = graph_info_map_.find(executable_graph_handle);
++       if (graph_it != graph_info_map_.end()) {
++-        return graph_it->second.get();
+++        return graph_it->second;
++       }
++     }
++ 
++     auto graph_info = CreateGraphInfo(executable_graph_handle);
++-
++     if (!graph_info) {
++       return nullptr;
++     }
++ 
++     std::unique_lock lock(mutex_);
++-    return graph_info_map_.emplace(executable_graph_handle, std::move(graph_info))
++-        .first->second.get();
+++    return graph_info_map_.try_emplace(executable_graph_handle, std::move(graph_info))
+++        .first->second;
+++  }
+++
+++  [[nodiscard]] std::vector<std::shared_ptr<ZeGraphInfo>> RemoveContext(
+++      ze_context_handle_t context_handle) {
+++    std::vector<std::shared_ptr<ZeGraphInfo>> removed;
+++    {
+++      std::unique_lock lock(mutex_);
+++      for (auto graph_info_it = graph_info_map_.begin(); graph_info_it != graph_info_map_.end();) {
+++        if (graph_info_it->second->context == context_handle) {
+++          removed.push_back(std::move(graph_info_it->second));
+++          graph_info_it = graph_info_map_.erase(graph_info_it);
+++        } else {
+++          ++graph_info_it;
+++        }
+++      }
+++    }
+++    return removed;
+++  }
+++
+++  [[nodiscard]] std::shared_ptr<ZeGraphInfo> Remove(
+++      ze_executable_graph_handle_t executable_graph_handle) {
+++    std::shared_ptr<ZeGraphInfo> removed;
+++    {
+++      std::unique_lock lock(mutex_);
+++      auto graph_info_it = graph_info_map_.find(executable_graph_handle);
+++      if (graph_info_it != graph_info_map_.end()) {
+++        removed = std::move(graph_info_it->second);
+++        graph_info_map_.erase(graph_info_it);
+++      }
+++    }
+++    return removed;
+++  }
+++
+++  [[nodiscard]] auto RemoveAll() {
+++    std::unique_lock lock(mutex_);
+++    return std::exchange(graph_info_map_, {});
++   }
++ 
++  private:
++-  std::unique_ptr<ZeGraphInfo> CreateGraphInfo(
+++  std::shared_ptr<ZeGraphInfo> CreateGraphInfo(
++       ze_executable_graph_handle_t executable_graph_handle) {
++     auto result = ZE_RESULT_SUCCESS;
++     ze_graph_handle_t graph_handle = nullptr;
++@@ -83,7 +120,7 @@ class ZeGraphStorage {
++       }
++     }
++ 
++-    auto graph_info = std::make_unique<ZeGraphInfo>();
+++    auto graph_info = std::make_shared<ZeGraphInfo>();
++     graph_info->graph = graph_handle;
++     graph_info->executable_graph = executable_graph_handle;
++     graph_info->primary_command_list = command_list_handle;
++@@ -94,7 +131,7 @@ class ZeGraphStorage {
++ 
++   Level0Wrapper* loader_;
++   mutable std::shared_mutex mutex_;
++-  std::unordered_map<ze_executable_graph_handle_t, std::unique_ptr<ZeGraphInfo>> graph_info_map_;
+++  std::unordered_map<ze_executable_graph_handle_t, std::shared_ptr<ZeGraphInfo>> graph_info_map_;
++ };
++ 
++ #endif  // PTI_LEVELZERO_ZE_GRAPH_STORAGE_H_
++diff --git a/sdk/src/view_handler.h b/sdk/src/view_handler.h
++index a0beda7..ae879d5 100644
++--- a/sdk/src/view_handler.h
+++++ b/sdk/src/view_handler.h
++@@ -282,13 +282,15 @@ struct PtiViewRecordHandler {
++       } catch (...) {
++         SPDLOG_ERROR("Unknown Exception in {}", __FUNCTION__);
++       }
++-#if defined(_WIN32)
++-      // TODO(PTI-446): Add a public function to manually release the collector and reset any PTI
++-      // resources. E.g., ptiViewShutdown, ptiShutdown, or something like that.
++-      collector_.release();
++-#else
++-      collector_.reset();
+++      if (collector_) {
+++#if !defined(_WIN32)
+++        collector_->DisableTracer();
++ #endif
+++        // TODO(PTI-446): Add a public function to manually release the collector and reset any PTI
+++        // resources. E.g., ptiViewShutdown, ptiShutdown, or something like that.
+++        // Use static pointer to avoid leak detectors complaining.
+++        [[maybe_unused]] static auto* const released_collector = collector_.release();
+++      }
++       deinit_ = true;
++     }
++   }
+diff --git a/engine/direct-xpu-034-inkling/pti/upstream.json b/engine/direct-xpu-034-inkling/pti/upstream.json
+new file mode 100644
+index 0000000..2a66d67
+--- /dev/null
++++ b/engine/direct-xpu-034-inkling/pti/upstream.json
+@@ -0,0 +1,24 @@
++{
++  "version": "1.2.1",
++  "base_commit": "25a77ed7693ac155bc62e563060b0976f9934b53",
++  "fix_commit": "dd8940ff817f94461795708fe3c386ab9e09d3b1",
++  "fix_url": "https://github.com/intel/pti-gpu/commit/dd8940ff817f94461795708fe3c386ab9e09d3b1",
++  "patch_sha256": "a35755ce920cab9535c42e550453f7ebcab6eee42d02a6d3ae804bb190dc38dd",
++  "files_before_sha256": {
++    "sdk/src/levelzero/ze_collector.h": "9b9cb2510e95b6b1283e5a4ecdb89a9c92ee9f4a2d11b8a523e75efbd6ba2f5b",
++    "sdk/src/levelzero/ze_gpu_command.h": "b91bd2505699bb816b30d133b61df41c3942187060a766212d4617406f567bc2",
++    "sdk/src/levelzero/ze_graph_storage.h": "f4d72a21ea946d0536afa1acffef3fd948522c5c8edc3218d394baae70e222e4",
++    "sdk/src/view_handler.h": "ca95332ff46fed081580edd864c13e7e952ce682fa8adc3ebb5b0a719756c55c"
++  },
++  "files_after_sha256": {
++    "sdk/src/levelzero/ze_collector.h": "b98b4d226e6eccb7d3f776953cd508fca789b1aa1b6f6c20d9986b9b2692b340",
++    "sdk/src/levelzero/ze_gpu_command.h": "9cd6dc0d7c023ef8d5de76390e38758d2e6339fe13dff7fec970b0e479f4dcc0",
++    "sdk/src/levelzero/ze_graph_storage.h": "e475e09eabdd2e29922662d791bab867bb5b2e954cc1513b7cedc7ba0c299321",
++    "sdk/src/view_handler.h": "25ce8a8a78e6af76be5a8c31267adccb1ae2d779ae2933ae992a0818f76ff7b3"
++  },
++  "build_dependencies": {
++    "fmt-src": "407c905e45ad75fc29bf0f9bb7c5c2fd3475976f",
++    "ittapi-src": "2369c7eb60bbe5db9f0996b0366c68c4c0950100",
++    "spdlog-src": "79524ddd08a4ec981b7fea76afd08ee05f83755d"
++  }
++}
+diff --git a/engine/direct-xpu-034-inkling/requirements.txt b/engine/direct-xpu-034-inkling/requirements.txt
+new file mode 100644
+index 0000000..334decc
+--- /dev/null
++++ b/engine/direct-xpu-034-inkling/requirements.txt
+@@ -0,0 +1,5 @@
++transformers==5.22.2
++tokenizers==0.23.3
++mcp==2.3.0
++mcp-types==2.3.0
++auto-round-lib==0.16.0
+diff --git a/engine/direct-xpu-034-inkling/source-manifest.json b/engine/direct-xpu-034-inkling/source-manifest.json
+new file mode 100644
+index 0000000..bf6e342
+--- /dev/null
++++ b/engine/direct-xpu-034-inkling/source-manifest.json
+@@ -0,0 +1,14 @@
++{
++  "schema": 1,
++  "status": "SOURCE_SNAPSHOT_NOT_RELEASE",
++  "note": "Inkling vLLM 0.34 runtime integration sources.",
++  "files_sha256": {
++    "build-native.sh": "fd25f52dc26b57e71d417f3b32d2a47dbceeb59bbde7b8f0c7e3c991e9f36c62",
++    "check-image-inkling.py": "ad7ea90c14539651c3038760bce90ddd0a51ed371df52938455245dcccbd1e00",
++    "install-inkling.py": "8b6ccb273a3b331b2ec9586fea7b54413ad9efc59f3a47465a8c562ada2c186d",
++    "pti/README.md": "eb5ec919e0df1428448ff2be4960a101ae9a0adb28efd1e2cb4d4819b34d23c6",
++    "pti/build.py": "15d6d152866071723254d6fa7577d0be1707883cf56ea2f036258ad518b3df80",
++    "pti/native-graph-lifetime.patch": "a35755ce920cab9535c42e550453f7ebcab6eee42d02a6d3ae804bb190dc38dd",
++    "pti/upstream.json": "2a6e9b87e79de5f3e9f32adefbbdb5e558306fb8ef6a735e9420e24921bdcfb3"
++  }
++}
+diff --git a/scripts/build-engine.py b/scripts/build-engine.py
+index e331ef7..b63bf47 100644
+--- a/scripts/build-engine.py
++++ b/scripts/build-engine.py
+@@ -20,6 +20,7 @@ from release_integrity import check_build_tag
+ 
+ REPO = Path(__file__).resolve().parents[1]
+ SOURCE = REPO / 'engine/direct-xpu'
++DOCKERFILE = REPO / 'docker/direct-xpu/Dockerfile'
+ 
+ 
+ def sha(path):
+@@ -41,7 +42,11 @@ def prepare_context(out, download_cache=None):
+     manifest = json.loads((SOURCE / 'source-manifest.json').read_text())
+     actual_files = {str(p.relative_to(SOURCE)) for folder in ('runtime', 'vllm', 'm04', 'pti')
+                     for p in (SOURCE / folder).rglob('*') if p.is_file() and '__pycache__' not in p.parts}
+-    actual_files.update({'m04-empty-split.patch', 'rebuild-m04.sh'})
++    if (SOURCE / 'm04').is_dir():
++        actual_files.update({'m04-empty-split.patch', 'rebuild-m04.sh'})
++    else:  # Inkling-only engines list their top-level scripts in the manifest.
++        actual_files.update(p.name for p in SOURCE.iterdir() if p.is_file() and p.name not in
++                            ('build-lock.json', 'requirements.txt', 'source-manifest.json'))
+     if actual_files != set(manifest['files_sha256']):
+         raise RuntimeError('Integration source inventory differs from its manifest')
+     for name, expected in manifest['files_sha256'].items():
+@@ -54,14 +59,15 @@ def prepare_context(out, download_cache=None):
+     context.mkdir()
+     shutil.copytree(SOURCE, context / 'direct', ignore=shutil.ignore_patterns('__pycache__'))
+     shutil.copytree(REPO / 'engine/exl3xpu/mb4-k4/source', context / 'matrix-source')
+-    m04 = context / 'm04-source'
+-    m04.mkdir()
+-    for name in ('csrc', 'patches'):
+-        shutil.copytree(SOURCE / 'm04' / name, m04 / name)
++    if (SOURCE / 'm04').is_dir():
++        m04 = context / 'm04-source'
++        m04.mkdir()
++        for name in ('csrc', 'patches'):
++            shutil.copytree(SOURCE / 'm04' / name, m04 / name)
+     shutil.copytree(REPO / 'runtime', context / 'runtime', ignore=shutil.ignore_patterns('__pycache__'))
+     shutil.copyfile(REPO / 'engine/cache1792/cow_copy_fix.py', context / 'cow_copy_fix.py')
+     shutil.copyfile(REPO / 'docker/patches/b70_mtp_policy.py', context / 'b70_mtp_policy.py')
+-    shutil.copyfile(REPO / 'docker/direct-xpu/Dockerfile', context / 'Dockerfile')
++    shutil.copyfile(DOCKERFILE, context / 'Dockerfile')
+     if lock['upstream_image'] not in (context / 'Dockerfile').read_text():
+         raise RuntimeError('Dockerfile and locked upstream image differ')
+     downloads = out / 'downloads'
+@@ -118,13 +124,17 @@ def cleanup_build_containers(log):
+ 
+ 
+ def main():
++    global SOURCE, DOCKERFILE
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--tag', required=True)
+     parser.add_argument('--output', required=True, type=Path)
+     parser.add_argument('--prepare-only', action='store_true', help='Download and verify the build context, without Docker')
+     parser.add_argument('--download-cache', type=Path, help='Optional existing wheel cache; checksums are always verified')
+     parser.add_argument('--timeout-seconds', type=int, default=10800)
++    parser.add_argument('--engine-dir', type=Path, default=SOURCE, help='Integration source directory')
++    parser.add_argument('--dockerfile', type=Path, default=DOCKERFILE)
+     args = parser.parse_args()
++    SOURCE, DOCKERFILE = args.engine_dir.resolve(), args.dockerfile.resolve()
+     check_build_tag(args.tag, REPO)
+     if not 60 <= args.timeout_seconds <= 10800:
+         raise SystemExit('Build deadline must be between 60 seconds and three hours')

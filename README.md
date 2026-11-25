@@ -1,3 +1,153 @@
+# b70-prod: Inkling 2 Mini on one Intel Arc Pro B70, vLLM 0.34
+
+This branch is the serving stack we run in production. It is
+[Danmoreng's intel-b70-inkling2-mini-vllm](https://github.com/Danmoreng/intel-b70-inkling2-mini-vllm)
+with our additions, ported to vLLM 0.34.0. Danmoreng wrote the original stack: the EXL3 and SYCL kernels,
+the vLLM adapter, DSpark drafting, the prefill path and all the measurements in his README (below).
+Our changes are opt-in knobs on top of his code. Several are open as PRs to his repo
+([#1](https://github.com/Danmoreng/intel-b70-inkling2-mini-vllm/pull/1),
+[#2](https://github.com/Danmoreng/intel-b70-inkling2-mini-vllm/pull/2),
+[#4](https://github.com/Danmoreng/intel-b70-inkling2-mini-vllm/pull/4)).
+
+Hardware: a single Intel Arc Pro B70 (32 GB). One request at a time, 262,144-token context.
+
+Our additions:
+- vLLM 0.34.0 port of the plugin: DSpark registered as a speculative method, plugin-side ring-prefix reuse.
+  The runtime image is built on the official `vllm/vllm-openai-xpu` v0.34.0 image.
+- IQR GPTQ 4-bit routed experts (`INKLING2_EXPERTS=iqr4`). This is a SYCL decode library plus an int8-DPAS prefill library.
+- N-gram copy drafting inside the DSpark speculator, with the width-only draft handoff (`NOCOPY`).
+- Prefill fusions: glue fusion, relative bias computed in the attention kernel, a one-pass global table and an unrolled IQR prefill GEMM.
+  All are bit-exact against the unfused path.
+- Decode: 256-GRF AOT build of the XMX decode attention (no register spills), and 185 fewer standalone cast kernels per step.
+  Both are bit-exact.
+
+Community: [Launch80 Discord](https://discord.gg/launch80). Most members run AMD R9700s, and a small group runs Intel Arc.
+
+## Models
+
+| Repo | Experts | Use |
+| --- | --- | --- |
+| [davetha/Inkling-2-Mini-Uncensored-IQR4-B70](https://huggingface.co/davetha/Inkling-2-Mini-Uncensored-IQR4-B70) | IQR GPTQ 4-bit | this branch (default) |
+| [davetha/Inkling-2-Mini-Uncensored-EXL3-B70](https://huggingface.co/davetha/Inkling-2-Mini-Uncensored-EXL3-B70) | EXL3 4bpw | `INKLING2_EXPERTS=exl3` |
+
+Both apply the [OpenUncensored](https://huggingface.co/OpenUncensored/Inkling-2-Mini-Uncensored) refusal edit to
+[Inkling 2 Mini](https://huggingface.co/thinkingmachines/Inkling-2-Mini). The model cards list the quality measurements.
+
+## Build and serve
+
+You need Linux x86-64 with the B70's DRM render node, Docker, Git, Python 3 and the Hugging Face `hf` CLI.
+Give the scripts exclusive use of the GPU.
+
+```bash
+git clone -b b70-prod https://github.com/davetha/intel-b70-inkling2-mini-vllm.git
+cd intel-b70-inkling2-mini-vllm
+
+# 1. Images: vLLM 0.34.0 runtime + oneAPI builder (1-2 h; skip if you already have them and set
+#    INKLING2_RUNTIME / INKLING2_BUILDER to their tags)
+bash scripts/build-images-034.sh
+
+# 2. Model (about 16 GB)
+hf download davetha/Inkling-2-Mini-Uncensored-IQR4-B70 \
+  --revision 8301907a28db7a4e71beeeb59406e7ddbbeebf95 --local-dir models/iqr4-unc
+
+# 3. Kernels into .work/build/ (the first step checks one library on the GPU)
+export INKLING2_RENDER_NODE=/dev/dri/by-path/pci-0000:03:00.0-render   # your B70: ls -l /dev/dri/by-path/
+bash scripts/build-b70-prod.sh
+
+# 4. Serve (OpenAI-compatible, model name inkling2-mini-exl3-b70)
+bash scripts/serve-b70-prod.sh
+```
+
+In a second terminal:
+
+```bash
+curl -fsS http://127.0.0.1:8093/health
+curl -s http://127.0.0.1:8093/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "model": "inkling2-mini-exl3-b70", "reasoning_effort": "medium", "max_tokens": 2048,
+  "messages": [{"role": "user", "content": "Write a Python function that checks whether a number is prime."}]}'
+```
+
+The first start compiles JIT kernels and takes a few minutes. The server runs in a container named
+`inkling2-vllm-exl3`. Stop it with Ctrl-C or `docker stop inkling2-vllm-exl3`.
+
+## Settings
+
+`scripts/serve-b70-prod.sh` sets these values, and each one can be overridden from the environment.
+`scripts/serve-coding-agent.sh dspark` and `scripts/serve-vllm-exl3.sh` set the rest of the profile.
+
+| Variable | Value | Meaning |
+| --- | --- | --- |
+| `INKLING2_MODEL_DIR` | `models/iqr4-unc` | Checkpoint directory, relative to the checkout |
+| `INKLING2_EXPERTS` | `iqr4` | Routed experts from the IQR GPTQ-4 library (`exl3` for the EXL3 checkpoint) |
+| `INKLING2_HOST` / `INKLING2_VLLM_PORT` | `127.0.0.1` / `8093` | API bind address and port (our server uses `0.0.0.0` / `8202`) |
+| `INKLING2_DEADLINE_EPOCH` | `4102444800` | Container stop time. The upstream default is 22:44 Europe/Berlin each day |
+| `INKLING2_RENDER_NODE` | upstream default `pci-0000:03:00.0` | B70 render node, set it for your machine |
+| `INKLING2_RUNTIME` / `INKLING2_BUILDER` | `local/b70-inkling-vllm:034-runtime` / `local/inkling2-oneapi-034:2026.1.1` | Images from `scripts/build-images-034.sh` |
+| `INKLING2_CXX_STD` | `c++20` | C++ standard for kernel builds (the 0.34 builder needs C++20) |
+| `INKLING2_ONEDNN_DETERMINISTIC` | `1` | Fixed oneDNN reduction order, so the same GEMM gives the same bits on every run |
+| `INKLING2_NGRAM_DRAFT` | `1` | Copy drafts: continue the longest earlier match of the trailing n-gram. DSpark drafts otherwise |
+| `INKLING2_NGRAM_MIN` / `INKLING2_NGRAM_MAX` | `3` / `32` | Shortest and longest n-gram matched |
+| `INKLING2_NGRAM_DEPTH` | `7` | Copied draft length and vLLM `num_speculative_tokens` |
+| `INKLING2_NGRAM_NOCOPY` | `1` | Pass only each draft's valid width to the scheduler, not a copy of the tokens. Output is exact |
+| `INKLING2_DRAFT_MAX` | `3` | DSpark draft tokens per step when there is no n-gram match |
+| `INKLING2_PREFILL_PROFILE` | `optimized` | Danmoreng's accelerated prefill flag set (see `serve-coding-agent.sh`) |
+| `INKLING2_VLLM_BATCH` | `4096` | Prefill chunk (`--max-num-batched-tokens`) |
+| `INKLING2_LOCAL_BIAS_TILE` | `64,256,8` | Tile (rows, cols, warps) of the local relative-bias table kernel. Output is bit-identical for any tile |
+| `INKLING2_PREFILL_GLUE` | `1` | Fused prefill glue kernels, bit-exact |
+| `INKLING2_PREFILL_REL_BIAS` | `1` | Relative bias computed inside the 256-GRF prefill attention kernel (`inkling2-rel-attention.so`) |
+| `INKLING2_PREFILL_GLOBAL_TABLE` | `1` | One-pass global-attention bias table |
+| `INKLING2_DECODE_XMX256` | `1` | Decode XMX attention from the 256-GRF AOT library (`inkling2-decode-xmx.so`), no spills |
+| `INKLING2_DECODE_CASTS` | `1` | Cached FP32 norm weights, int32 positions once per step, BF16 q converted in the XMX kernel |
+| `INKLING2_DECODE_XMX_LIB` | `/lab/.work/build/inkling2-decode-xmx.so` | Decode attention library (path inside the container) |
+
+Fixed by the launchers: DSpark with probabilistic drafts (top-k 20) and block verification, FP8 E4M3 KV cache
+(4,311,744,512 bytes), 262,144-token context, one sequence, prefix reuse for the most recent sequence, and XPU decode graphs.
+Adaptive DSpark (`INKLING2_DSPARK_ADAPTIVE=1`) cannot be combined with `NOCOPY`.
+
+## Measurements
+
+These numbers come from our tuning log, on one B70 with one request at a time and the full 262,144-token profile.
+We report each value as the range over two back-to-back runs. Our column is this branch's settings (runs of 2026-11-24/25).
+
+| Benchmark | This branch | Danmoreng main, same harness |
+| --- | ---: | ---: |
+| Prefill, 4K cold prompt (tok/s) | 5,842–5,875 | 3,736–3,800 |
+| Prefill, 64K cold prompt (tok/s) | 4,723–4,726 ¹ | 3,271–3,288 |
+| Prefill, 192K cold prompt (tok/s) | 3,364–3,395 | 2,571–2,574 |
+| Decode after 4K, greedy (tok/s) | 159.5–160.3 | 64.3–66.5 ² |
+| Decode after 192K, greedy (tok/s) | 112.7–113.1 | 49.0–50.4 ² |
+| Fresh generation, sampled (tok/s) | 105.3–105.4 | 82.1 ³ |
+| Copy-heavy code edits, greedy (tok/s) | 327.8–328.2 | 159.5 ³ |
+| Copy-heavy code edits, sampled (tok/s) | 308.6–309.3 ⁴ | not measured |
+
+How we measured:
+- Prefill and decode use `scripts/bench-sycl-baseline.py`, which reports vLLM's own prompt and decode rates.
+  Each prompt is a cold synthetic logbook with an embedded code to retrieve, followed by 128 greedy output tokens.
+  4K is the median of three prompts (seeds 37-39) after one warm-up request. Individual 4K prompts decode at
+  157-237 tok/s, depending on how well the drafts match. 64K and 192K are single prompts. Retrieval passed in every row.
+- Fresh generation uses six write-new-code and explain prompts at the model's default sampling, with thinking off and a
+  natural stop (at most 1,024 tokens). The rate is completion tokens divided by wall time.
+- Copy-heavy runs paste eight 120-250 line Python files and ask for each whole file back with one small edit (thinking off).
+- These two harnesses are local scripts and are not in this repo.
+- Danmoreng column: his main at `92e2347` on vLLM 0.33 with the EXL3 4bpw checkpoint and his default coding profile
+  (4 slots, adaptive DSpark up to 7 drafts, `INKLING2_PREFILL_PROFILE=optimized`), measured on 2026-11-24.
+
+¹ Measured with the current prefill settings, before the two decode changes (those changes do not touch prefill).
+² Per-prompt 4K decode was 63.5 / 111.9 / 66.5 tok/s. In our tests, adaptive DSpark stops proposing on two of the
+  three random-digit logbook prompts, so this benchmark understates his decode on ordinary text.
+³ EXL3 uncensored checkpoint on his main plus our IQR PR branch code (the EXL3 path is unchanged), same 4-slot
+  adaptive profile, 2026-11-23. Single runs.
+⁴ Last measured with `INKLING2_DECODE_XMX256=1` before `INKLING2_DECODE_CASTS=1` was added. Not re-measured since.
+
+Quality checks, run when each change was adopted: a teacher-forced logprob probe matched the previous build
+(top-1 100%, KL 0.0000), and the output text was identical at 4K and 192K. Tool calls, multi-turn tool results and
+a coding check passed. There were 0/16 refusals on our refusal prompt set.
+Known issue: `reasoning_effort: "none"` still produces reasoning text, because the chat template has no no-think path.
+
+---
+
+# Upstream README (Danmoreng)
+
 # Inkling 2 Mini on Intel Arc Pro B70
 
 Serve [Inkling 2 Mini](https://huggingface.co/thinkingmachines/Inkling-2-Mini)
