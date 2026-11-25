@@ -8,7 +8,7 @@ check: real layer weights (q file = gptq.py output or an iqr-layer-XX.safetensor
   -> NaN rows (or a RuntimeError with INKLING2_IQR_CHECK_IDS=1).
 bench: random arenas cycled past L2; IQR vs EXL3 (prod knobs: prefill_min 48, pair_max 8, tiny DPAS 4/9/18) for decode
   (graph-replayed 48-call sequences) and prefill M.
-usage: check_iqr_moe.py check --layer L --q FILE --dense FILE --x FILE [--shard NVFP4_SHARD]
+usage: check_iqr_moe.py check --layer L --q FILE --dense FILE --x FILE --shard NVFP4_SHARD
        check_iqr_moe.py bench [--rows ...] [--pool P] [--layers N] [--no-exl3]
 """
 import argparse
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     p.add_argument("--layer", type=int, default=5)
     p.add_argument("--q"); p.add_argument("--dense"); p.add_argument("--x")
     p.add_argument("--row0", type=int, default=100000)
-    p.add_argument("--shard", default="/storage/inkling2/danmoreng-034/models/nvfp4-unc/model-00001-of-00001.safetensors")
+    p.add_argument("--shard", required=True, help="NVFP4 checkpoint shard with the router weights")
     p.add_argument("--check-rows", type=int, nargs="+", default=[1, 2, 3, 4, 5, 8, 9, 16, 47, 300, 2048])
     p.add_argument("--ref-rows", type=int, default=12)
     p.add_argument("--ref-full", type=int, default=47, help="check-rows size whose fp64 reference covers every row")
