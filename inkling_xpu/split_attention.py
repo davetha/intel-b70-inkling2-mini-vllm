@@ -12,6 +12,14 @@ LONG_VERIFY_SPLITS = os.environ.get("INKLING2_DSPARK_LONG_SPLITS", "0") == "1"
 # The same decode XMX kernels built AOT at 256 GRF (no spills, bit-identical; scripts/build-decode-xmx.sh).
 DECODE_XMX256 = os.environ.get("INKLING2_DECODE_XMX256", "0") == "1"
 _XMX_OPS = None
+# INKLING2_DECODE_CASTS=1 (with the 256-GRF library): BF16 q goes to the kernel, which converts it (same values).
+DECODE_CASTS = os.environ.get("INKLING2_DECODE_CASTS", "0") == "1"
+
+
+def _q16(q):
+    if DECODE_CASTS and DECODE_XMX256 and q.dtype == torch.bfloat16 and q.is_contiguous():
+        return q
+    return q.half().contiguous()
 
 
 def xmx_ops():
@@ -70,7 +78,7 @@ def paged_xmx(q, key_cache, value_cache, pages, length, pos, rel, proj, sink, pa
     partial = q.new_empty((parts, rows, heads, width), dtype=torch.float32)
     lse = q.new_empty((parts, rows, heads), dtype=torch.float32)
     xmx_ops().paged_xmx(
-        q.half().contiguous(),
+        _q16(q),
         key_cache,
         value_cache,
         pages,
@@ -91,7 +99,7 @@ def local_xmx(q, k, v, ring_positions, length, pos, rel, proj, sink):
     partial = q.new_empty((parts, rows, heads, width), dtype=torch.float32)
     lse = q.new_empty((parts, rows, heads), dtype=torch.float32)
     xmx_ops().local_xmx(
-        q.half().contiguous(),
+        _q16(q),
         k,
         v,
         ring_positions,

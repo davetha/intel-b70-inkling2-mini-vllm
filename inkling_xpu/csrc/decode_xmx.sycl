@@ -4,6 +4,7 @@
 // paged_xmx, draft_global_xmx, local_xmx), built AOT for the B70 with the large register file
 // (scripts/build-decode-xmx.sh): the JIT 128-GRF build spills (256 B global, 1.8-2.6 KB local, 0.2-1.1 KB draft), the
 // 256-GRF build does not, and the outputs are bit-identical (iqr/fuse/dxbench.py). Selected by INKLING2_DECODE_XMX256=1.
+// paged_xmx / local_xmx also take a BF16 q (INKLING2_DECODE_CASTS=1), converted in the kernel exactly as q.half().
 #include <torch/all.h>
 #include <torch/library.h>
 #include <c10/xpu/XPUStream.h>
@@ -39,6 +40,7 @@ template <int M, bool Local = false, bool Draft = false> struct PagedXmx {
     float *output, *lse;
     int splits, page_size, block_stride, token_stride, head_stride, extent;
     bool packed = false;
+    bool q_bf16 = false;  // q is BF16: converted here instead of a separate q.half() kernel (same RNE values)
 
     void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
         constexpr int R = 3 * M, tiles = (R + 7) / 8;
@@ -56,7 +58,14 @@ template <int M, bool Local = false, bool Draft = false> struct PagedXmx {
             int r = tile * 8 + row;
             if (r < R) {
                 int qh = (r / 3) * 24 + hk * 3 + r % 3;
-                auto qr = block_load<fp16, 128>(q + qh * 128);
+                simd<fp16, 128> qr;
+                if (q_bf16) {
+                    simd<uint32_t, 128> u = convert<uint32_t>(
+                        block_load<uint16_t, 128>(reinterpret_cast<const uint16_t *>(q) + qh * 128)) << 16;
+                    qr = convert<fp16>(u.template bit_cast_view<float>().read());
+                } else {
+                    qr = block_load<fp16, 128>(q + qh * 128);
+                }
 #pragma unroll
                 for (int c = 0; c < 8; ++c)
                     Q.template select<16, 1>((c * 8 + row) * 16) = qr.template select<16, 1>(c * 16);
@@ -215,7 +224,7 @@ void paged_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor pages, at::T
                at::Tensor positions, at::Tensor table, at::Tensor sink, at::Tensor out, at::Tensor lse,
                bool packed) {
     const int M = q.size(0), splits = out.size(0);
-    TORCH_CHECK(q.is_xpu() && q.is_contiguous() && q.scalar_type() == at::kHalf && q.dim() == 3 &&
+    TORCH_CHECK(q.is_xpu() && q.is_contiguous() && (q.scalar_type() == at::kHalf || q.scalar_type() == at::kBFloat16) && q.dim() == 3 &&
                 q.size(1) == 24 && q.size(2) == 128 && (M >= 1 && M <= 8));
     TORCH_CHECK(k.dim() == 4 && k.size(1) % 16 == 0 && k.size(1) >= 16 && k.size(2) == 8 && k.size(3) == 128 &&
                 k.stride(3) == 1 && k.strides() == v.strides() && k.sizes() == v.sizes() &&
@@ -251,6 +260,7 @@ void paged_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor pages, at::T
                                 int(k.stride(2)),
                                 int(table.size(2)),
                                 packed};
+        kern.q_bf16 = q.scalar_type() == at::kBFloat16;
         const size_t n = splits * 8 * ((Rows * 3 + 7) / 8);
         queue.submit([&](sycl::handler &h) { h.parallel_for(sycl::nd_range<1>(n, 1), kern); });
     };
@@ -347,7 +357,7 @@ void draft_global_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor start
 void local_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor pages, at::Tensor length,
                at::Tensor positions, at::Tensor table, at::Tensor sink, at::Tensor out, at::Tensor lse) {
     const int M = q.size(0), splits = out.size(0);
-    TORCH_CHECK(q.is_xpu() && q.is_contiguous() && q.scalar_type() == at::kHalf && q.dim() == 3 &&
+    TORCH_CHECK(q.is_xpu() && q.is_contiguous() && (q.scalar_type() == at::kHalf || q.scalar_type() == at::kBFloat16) && q.dim() == 3 &&
                 q.size(1) == 24 && q.size(2) == 128 && (M >= 1 && M <= 8));
     TORCH_CHECK(k.dim() == 3 && k.size(0) >= 1040 && k.size(0) % 16 == 0 && k.size(1) == 8 &&
                 k.size(2) == 128 && k.is_contiguous() && v.is_contiguous() && k.sizes() == v.sizes() &&
@@ -382,6 +392,7 @@ void local_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor pages, at::T
                                       int(k.stride(0)),
                                       int(k.stride(1)),
                                       int(table.size(2))};
+        kern.q_bf16 = q.scalar_type() == at::kBFloat16;
         const size_t n = splits * 8 * ((Rows * 3 + 7) / 8);
         queue.submit([&](sycl::handler &h) { h.parallel_for(sycl::nd_range<1>(n, 1), kern); });
     };

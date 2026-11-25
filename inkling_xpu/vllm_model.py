@@ -62,6 +62,11 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self.use_decode_graph = os.environ.get("INKLING2_DECODE_GRAPH", "0") == "1"
         self.decode_graphs = {}
         self.local_xmx = local_xmx if os.environ.get("INKLING2_LOCAL_XMX", "0") == "1" else None
+        # INKLING2_DECODE_CASTS=1: the decode attention kernels get the step's int32 positions, cast once per forward.
+        self.decode_casts = os.environ.get("INKLING2_DECODE_CASTS", "0") == "1"
+        self._st_pos32 = None
+        if self.local_xmx is not None and self.decode_casts:
+            self.local_xmx = lambda q, k, v, ring, n, pos, *rest: local_xmx(q, k, v, ring, n, self._pos32(pos), *rest)
         self.use_paged_xmx = os.environ.get("INKLING2_PAGED_XMX", "0") == "1"
         self.packed_kv = os.environ.get("INKLING2_PACKED_KV", "0") == "1"
         if self.packed_kv and not (self.use_paged_xmx and cache.cache_dtype.startswith("fp8")
@@ -175,7 +180,7 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self._store_kv(key_cache, value_cache, k, v, batch.out_cache_loc)
         if self.use_paged_xmx and key_cache.dtype == torch.float8_e4m3fn and self.page_tokens % 16 == 0:
             return paged_xmx(q, key_cache, value_cache, batch.block_table, batch.seq_lens,
-                             pos, rel, proj, sink, paged_splits(batch.total_tokens, q.shape[0]), self.packed_kv)
+                             self._pos32(pos), rel, proj, sink, paged_splits(batch.total_tokens, q.shape[0]), self.packed_kv)
         splits = min(64, max(8, (batch.total_tokens + 1023) // 1024))
         return decode_paged(q, key_cache, value_cache, batch.block_table, batch.seq_lens, pos, rel, proj, sink,
                             queries_per_request=q.shape[0], num_splits=splits)
@@ -268,13 +273,17 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
                                seq_lens=torch.tensor([size], dtype=torch.int32, device=device),
                                out_cache_loc=torch.arange(size, device=device), total_tokens=size, first_position=0)
 
+    def _pos32(self, pos):
+        return self._st_pos32 if self._st_pos32 is not None and pos is self._st_pos else pos
+
     def _static_forward(self, ids, positions, batch, embeds=None):
         size = positions.numel()
         self._st_nq = size
         self._st_req_slots = torch.zeros(1, dtype=torch.int32, device=positions.device)
         self._st_slot = torch.zeros(size, dtype=torch.long, device=positions.device)
         self._st_pos = positions
-        self.swa_pos[0, positions.remainder(RING)] = positions.int()
+        self._st_pos32 = positions.int() if self.decode_casts else None
+        self.swa_pos[0, positions.remainder(RING)] = positions.int() if self._st_pos32 is None else self._st_pos32
         self.conv_pos[0, positions.remainder(CONV_RING)] = positions
         return self._forward_body(ids, positions, batch, None, embeds, return_hidden=True)
 
